@@ -61,8 +61,8 @@ Solution_t solve_greedy(int setuptime, int batch_size, const std::vector<JobInfo
         return job_info[a].ready > job_info[b].ready;
     });
 
-    int time = job_info[jobs[jobs.size() - batch_size]].ready;
-    std::cerr << "Time as the start: " << time << std::endl;
+    int time = job_info[jobs.back()].ready;
+    std::cerr << "Time at the start: " << time << std::endl;
     Solution_t batches;
 
     while (!jobs.empty()) {
