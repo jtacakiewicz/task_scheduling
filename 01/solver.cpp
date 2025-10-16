@@ -185,7 +185,7 @@ Solution_t beam_search(int setuptime, int batch_size, Solution_t best_sol,
     int n = job_info.size();
     int global_tdur = 0;
     int global_dur_batch = 0;
-    int check_per_conf = n;
+    int check_per_conf = n * 2;
 
     // int global_tabu_list[MAXN * MAXN]{-MAXN};
     // int global_tabu_batch[MAXN * MAXN]{-MAXN};
@@ -235,6 +235,7 @@ Solution_t beam_search(int setuptime, int batch_size, Solution_t best_sol,
             int found = 0;
             std::uniform_int_distribution<> dist(0, n - 1);
 
+            std::unordered_set<int> performed_swaps;
             while (found < check_per_conf && tries < max_tries) {
                 ++tries;
                 int id1 = dist(gen);
@@ -246,6 +247,9 @@ Solution_t beam_search(int setuptime, int batch_size, Solution_t best_sol,
                 auto b2 = batch_id[id2];
                 auto bX = std::max(b1, b2);
                 auto bM = std::min(b1, b2);
+                auto hash = (id1 * 7631563) ^ (id2*5928253);
+                if(performed_swaps.find(hash) != performed_swaps.end())
+                    continue;
 
                 //dont swap within the same batch
                 if (b1 == b2)
@@ -260,6 +264,7 @@ Solution_t beam_search(int setuptime, int batch_size, Solution_t best_sol,
                 int cmax = calc_cmax(setuptime, batch_size, solution.conf, job_info);
                 perform_swap(solution.conf, id1, id2, b2, b1);
                 swaps.push_back({sol_id, cmax, {id1, id2}, {b1, b2}});
+                performed_swaps.insert(hash);
                 ++found;
             }
             assert(found != 0);
