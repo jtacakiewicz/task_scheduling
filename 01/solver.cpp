@@ -166,16 +166,17 @@ std::vector<int> pick_biased_indices(size_t n, int pick_winners, int pick_rand, 
 }
 
 Solution_t beam_search(int setuptime, int batch_size, Solution_t best_sol,
-                                const std::vector<JobInfo> &job_info,
-                                int pick_winners=3, int pick_rand=5, double time_limit=5)
+                                const std::vector<JobInfo> &job_info, double time_limit=5,
+                                int pick_winners=3, int pick_rand=5)
 {
     std::mt19937 gen(42);
     double tune_time = 1.;
     double iters_per_second = -1;
     auto start = std::chrono::steady_clock::now();
     int n = job_info.size();
-    int global_tdur = best_sol.size() * n;
+    int global_tdur = n * n/2;
     int global_dur_batch = best_sol.size();
+    int check_per_conf = n*2;
 
     int global_tabu_list[MAXN * MAXN]{-MAXN};
     int global_tabu_batch[MAXN * MAXN]{-MAXN};
@@ -215,24 +216,41 @@ Solution_t beam_search(int setuptime, int batch_size, Solution_t best_sol,
                 for (int job : solution[i])
                     batch_id[job] = i;
 
-            for(int id1 = 0; id1 < n; id1++) {
-                for(int id2 = id1+1; id2 < n; id2++) {
-                    auto b1 = batch_id[id1];
-                    auto b2 = batch_id[id2];
-                    auto bX = std::max(b1, b2);
-                    auto bM = std::min(b1, b2);
-                    if(batch_id[id1] == batch_id[id2])
-                        continue;
-                    if(global_tabu_list[id1*n+id2]>global_iter - global_tdur )
-                        continue;
-                    if(global_tabu_batch[bM*n+bX]>global_iter - global_dur_batch )
-                        continue;
-                    perform_swap(solution, id1, id2, b1, b2);
-                    int cmax = calc_cmax(setuptime, batch_size, solution, job_info);
-                    perform_swap(solution, id1, id2, b2, b1);
-                    swaps.push_back({sol_id, cmax, {id1, id2}, {b1, b2}});
-                }
+            int tries = 0;
+            const int max_tries = check_per_conf * 10; // limit to avoid infinite loops
+            int found = 0;
+            std::uniform_int_distribution<> dist(0, n - 1);
+
+            while (found < check_per_conf && tries < max_tries) {
+                ++tries;
+                int id1 = dist(gen);
+                int id2 = dist(gen);
+                if (id1 == id2) continue; 
+                if (id1 > id2) std::swap(id1, id2);
+
+                auto b1 = batch_id[id1];
+                auto b2 = batch_id[id2];
+                auto bX = std::max(b1, b2);
+                auto bM = std::min(b1, b2);
+
+                //dont swap within the same batch
+                if (b1 == b2)
+                    continue;
+                //respect tabu lists
+                if (global_tabu_list[id1*MAXN + id2] > global_iter - global_tdur)
+                    continue;
+                if (global_tabu_batch[bM*MAXN + bX] > global_iter - global_dur_batch)
+                    continue;
+
+                perform_swap(solution, id1, id2, b1, b2);
+                int cmax = calc_cmax(setuptime, batch_size, solution, job_info);
+                perform_swap(solution, id1, id2, b2, b1);
+                swaps.push_back({sol_id, cmax, {id1, id2}, {b1, b2}});
+
+                swaps.push_back({sol_id, cmax, {id1, id2}, {b1, b2}});
+                ++found;
             }
+            assert(found != 0);
         }
 
         // for(auto& l : last_swaps) {
@@ -240,7 +258,7 @@ Solution_t beam_search(int setuptime, int batch_size, Solution_t best_sol,
         //     l.sol_id = winners_size;
         //     winners_size++;
         // }
-
+        //
         // swaps.insert(swaps.end(), last_swaps.begin(), last_swaps.end());
         sort(swaps.begin(), swaps.end(), [](auto &a, auto &b){
             return a.cmax < b.cmax;
@@ -266,8 +284,8 @@ Solution_t beam_search(int setuptime, int batch_size, Solution_t best_sol,
             int b2 = swap.batch_ids.second;
             auto bX = std::max(b1, b2);
             auto bM = std::min(b1, b2);
-            global_tabu_list[id1*n+id2] = global_iter;
-            global_tabu_batch[bM*n+bX] = global_iter;
+            global_tabu_list[id1*MAXN+id2] = global_iter;
+            global_tabu_batch[bM*MAXN+bX] = global_iter;
 
             if (swap.cmax < best_cmax_so_far) {
                 std::cerr << "New best: " << swap.cmax << std::endl;
@@ -283,12 +301,14 @@ Solution_t beam_search(int setuptime, int batch_size, Solution_t best_sol,
 }
 
 int main(int argc, char **argv) {
-    if (argc < 2) {
-        std::cerr << "Usage: " << argv[0] << " <input_file>" << std::endl;
+    if (argc < 4) {
+        std::cerr << "Usage: " << argv[0] << " <input_file> <output_file> <time_limit_sec>" << std::endl;
         return 1;
     }
 
     std::ifstream fin(argv[1]);
+    std::ofstream fout(argv[2]);
+    double sec_limit = std::stod(argv[3]);
     if (!fin) {
         std::cerr << "Error opening file." << std::endl;
         return 1;
@@ -307,17 +327,17 @@ int main(int argc, char **argv) {
     auto solution = solve_greedy(setup, batch_s, job_info);
     int cgreedy = calc_cmax(setup, batch_s, solution, job_info);
     std::cerr << "greedy solution: " << cgreedy  << std::endl;
-    solution = beam_search(setup, batch_s, solution, job_info);
+    solution = beam_search(setup, batch_s, solution, job_info, sec_limit);
     int ctabu = calc_cmax(setup, batch_s, solution, job_info);
     std::cerr << "search solution: " << ctabu << std::endl;
     std::cerr << "search improvement: " << std::setprecision(2) << (cgreedy-ctabu)/avg_task*100 <<"% of a task\n";
 
-    std::cout << "0" << std::endl; // cmax
-    std::cout << solution.size() << std::endl; // number of batches
+    fout << "0" << std::endl; // cmax
+    fout << solution.size() << std::endl; // number of batches
     for (auto &b : solution) {
         for (int j : b)
-            std::cout << j + 1 << " ";
-        std::cout << std::endl;
+            fout << j + 1 << " ";
+        fout << std::endl;
     }
 
     return 0;
