@@ -174,6 +174,7 @@ struct CensoredSolution {
 };
 CensoredSolution old_winners[MAX_WINNERS];
 CensoredSolution winners[MAX_WINNERS];
+ThreadPool thread_pool;
 
 std::vector<Swap> search_swaps(CensoredSolution& solution, int sol_id, int n, int global_iter, int tabu_ind, int tabu_batch, int setuptime, int batch_size, const std::vector<JobInfo> &job_info, int check_per_conf, std::mt19937::result_type seed) {
     std::mt19937 gen(seed);
@@ -201,8 +202,6 @@ std::vector<Swap> search_swaps(CensoredSolution& solution, int sol_id, int n, in
         auto bX = std::max(b1, b2);
         auto bM = std::min(b1, b2);
         auto hash = (id1 * 7631563) ^ (id2*5928253);
-        // if(performed_swaps.find(hash) != performed_swaps.end())
-        //     continue;
 
         //dont swap within the same batch
         if (b1 == b2)
@@ -266,11 +265,18 @@ Solution_t beam_search(int setuptime, int batch_size, Solution_t best_sol,
 
         std::vector<Swap> swaps;
 
+        std::mutex swaps_results_mut;
         for (int sol_id=0; sol_id < winners_size; sol_id++) {
             auto seed = gen();
-            auto lswaps = search_swaps(winners[sol_id], sol_id, n, global_iter, tabu_dur, tabu_batch_dur, setuptime, batch_size, job_info, check_per_conf, seed);
-            swaps.insert(swaps.end(), lswaps.begin(), lswaps.end());
+            thread_pool.addTask([&, sol_id, seed]() {
+                auto lswaps = search_swaps(winners[sol_id], sol_id, n, global_iter, tabu_dur, tabu_batch_dur, setuptime, batch_size, job_info, check_per_conf, seed);
+                swaps_results_mut.lock();
+                swaps.insert(swaps.end(), lswaps.begin(), lswaps.end());
+                swaps_results_mut.unlock();
+            });
         }
+        thread_pool.waitForCompletion();
+
         if(swaps.size() == 0) {
             std::cerr << "Unexpected behaviour!\n";
             return best_sol;
