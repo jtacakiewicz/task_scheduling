@@ -12,6 +12,7 @@
 #include <iostream>
 #include <chrono>
 #include <climits>
+#include "thread_pool.hpp"
 
 typedef std::vector<std::vector<int>> Solution_t;
 
@@ -143,7 +144,7 @@ void add_to_tabu(std::vector<std::vector<bool>> &tabu, int id1, int id2, int n) 
 }
 
 //the higher the lambda the more close to the top the results will be
-std::vector<int> pick_biased_indices(size_t n, int pick_winners, int pick_rand, std::mt19937& gen, double lmbda=0.01) {
+std::vector<int> pick_biased_indices(size_t n, int pick_winners, int pick_rand, std::mt19937& gen, double lmbda=0.05) {
     int max_win_id = std::min((int)n, pick_winners);
 
     std::vector<int> chosen;
@@ -174,6 +175,55 @@ struct CensoredSolution {
 CensoredSolution old_winners[MAX_WINNERS];
 CensoredSolution winners[MAX_WINNERS];
 
+std::vector<Swap> search_swaps(CensoredSolution& solution, int sol_id, int n, int global_iter, int tabu_ind, int tabu_batch, int setuptime, int batch_size, const std::vector<JobInfo> &job_info, int check_per_conf, std::mt19937::result_type seed) {
+    std::mt19937 gen(seed);
+    std::vector<Swap> local_swaps;
+    std::vector<int> batch_id(n, -1);
+    for (int i = 0; i < (int)solution.conf.size(); i++)
+        for (int job : solution.conf[i])
+            batch_id[job] = i;
+
+    int tries = 0;
+    const int max_tries = check_per_conf * 100;
+    int found = 0;
+    std::uniform_int_distribution<> dist(0, n - 1);
+
+    std::unordered_set<int> performed_swaps;
+    while (found < check_per_conf && tries < max_tries) {
+        ++tries;
+        int id1 = dist(gen);
+        int id2 = dist(gen);
+        if (id1 == id2) continue; 
+        if (id1 > id2) std::swap(id1, id2);
+
+        auto b1 = batch_id[id1];
+        auto b2 = batch_id[id2];
+        auto bX = std::max(b1, b2);
+        auto bM = std::min(b1, b2);
+        auto hash = (id1 * 7631563) ^ (id2*5928253);
+        // if(performed_swaps.find(hash) != performed_swaps.end())
+        //     continue;
+
+        //dont swap within the same batch
+        if (b1 == b2)
+            continue;
+        //respect tabu lists
+        if (solution.tabu_ind[id1*MAXN + id2] > global_iter - tabu_ind)
+            continue;
+        if (solution.tabu_batch[bM*MAXN + bX] > global_iter - tabu_batch)
+            continue;
+
+        perform_swap(solution.conf, id1, id2, b1, b2);
+        int cmax = calc_cmax(setuptime, batch_size, solution.conf, job_info);
+        perform_swap(solution.conf, id1, id2, b2, b1);
+        local_swaps.push_back({sol_id, cmax, {id1, id2}, {b1, b2}});
+        performed_swaps.insert(hash);
+        ++found;
+    }
+    assert(found != 0);
+    return local_swaps;
+}
+
 Solution_t beam_search(int setuptime, int batch_size, Solution_t best_sol,
                                 const std::vector<JobInfo> &job_info, double time_limit=5,
                                 int pick_winners=3, int pick_rand=5)
@@ -183,26 +233,19 @@ Solution_t beam_search(int setuptime, int batch_size, Solution_t best_sol,
     double iters_per_second = -1;
     auto start = std::chrono::steady_clock::now();
     int n = job_info.size();
-    int global_tdur = 0;
-    int global_dur_batch = 0;
+    int tabu_dur = n;
+    int tabu_batch_dur = best_sol.size();
     int check_per_conf = n * 2;
-
-    // int global_tabu_list[MAXN * MAXN]{-MAXN};
-    // int global_tabu_batch[MAXN * MAXN]{-MAXN};
-    // for(int i = 0; i < MAXN * MAXN; i++) {
-    //     global_tabu_list[i] = -0xffffff;
-    //     global_tabu_batch[i] = -0xffffff;
-    // }
 
     int old_winners_size = 0;
     int winners_size = 1;
     winners[0].conf = best_sol;
     for(int i = 0; i < MAX_WINNERS; i++) {
-        std::fill(std::begin(old_winners[i].tabu_ind), std::end(old_winners[i].tabu_ind), -0xffffff);
-        std::fill(std::begin(winners[i].tabu_ind), std::end(winners[i].tabu_ind), -0xffffff);
+        std::fill(std::begin(old_winners[i].tabu_ind), std::end(old_winners[i].tabu_ind), INT16_MIN);
+        std::fill(std::begin(winners[i].tabu_ind), std::end(winners[i].tabu_ind), INT16_MIN);
 
-        std::fill(std::begin(old_winners[i].tabu_batch), std::end(old_winners[i].tabu_batch), -0xffffff);
-        std::fill(std::begin(winners[i].tabu_batch), std::end(winners[i].tabu_batch), -0xffffff);
+        std::fill(std::begin(old_winners[i].tabu_batch), std::end(old_winners[i].tabu_batch), INT16_MIN);
+        std::fill(std::begin(winners[i].tabu_batch), std::end(winners[i].tabu_batch), INT16_MIN);
     }
 
     std::vector<Swap> last_swaps;
@@ -215,7 +258,7 @@ Solution_t beam_search(int setuptime, int batch_size, Solution_t best_sol,
         double elapsed = std::chrono::duration<double>(now - start).count();
         if (elapsed > tune_time && iters_per_second == -1) {
             iters_per_second = global_iter / elapsed;
-            std::cerr << "Search iterations per second: " << iters_per_second << std::endl;
+            std::cerr << "Search iterations per second: " << iters_per_second*(pick_winners*pick_rand) << std::endl;
         }
         if (elapsed > time_limit)
             break;
@@ -224,59 +267,14 @@ Solution_t beam_search(int setuptime, int batch_size, Solution_t best_sol,
         std::vector<Swap> swaps;
 
         for (int sol_id=0; sol_id < winners_size; sol_id++) {
-            auto& solution = winners[sol_id];
-            std::vector<int> batch_id(n, -1);
-            for (int i = 0; i < (int)solution.conf.size(); i++)
-                for (int job : solution.conf[i])
-                    batch_id[job] = i;
-
-            int tries = 0;
-            const int max_tries = check_per_conf * 10; // limit to avoid infinite loops
-            int found = 0;
-            std::uniform_int_distribution<> dist(0, n - 1);
-
-            std::unordered_set<int> performed_swaps;
-            while (found < check_per_conf && tries < max_tries) {
-                ++tries;
-                int id1 = dist(gen);
-                int id2 = dist(gen);
-                if (id1 == id2) continue; 
-                if (id1 > id2) std::swap(id1, id2);
-
-                auto b1 = batch_id[id1];
-                auto b2 = batch_id[id2];
-                auto bX = std::max(b1, b2);
-                auto bM = std::min(b1, b2);
-                auto hash = (id1 * 7631563) ^ (id2*5928253);
-                if(performed_swaps.find(hash) != performed_swaps.end())
-                    continue;
-
-                //dont swap within the same batch
-                if (b1 == b2)
-                    continue;
-                //respect tabu lists
-                if (solution.tabu_ind[id1*MAXN + id2] > global_iter - global_tdur)
-                    continue;
-                if (solution.tabu_batch[bM*MAXN + bX] > global_iter - global_dur_batch)
-                    continue;
-
-                perform_swap(solution.conf, id1, id2, b1, b2);
-                int cmax = calc_cmax(setuptime, batch_size, solution.conf, job_info);
-                perform_swap(solution.conf, id1, id2, b2, b1);
-                swaps.push_back({sol_id, cmax, {id1, id2}, {b1, b2}});
-                performed_swaps.insert(hash);
-                ++found;
-            }
-            assert(found != 0);
+            auto seed = gen();
+            auto lswaps = search_swaps(winners[sol_id], sol_id, n, global_iter, tabu_dur, tabu_batch_dur, setuptime, batch_size, job_info, check_per_conf, seed);
+            swaps.insert(swaps.end(), lswaps.begin(), lswaps.end());
         }
-
-        // for(auto& l : last_swaps) {
-        //     winners[winners_size] = old_winners[l.sol_id];
-        //     l.sol_id = winners_size;
-        //     winners_size++;
-        // }
-        //
-        // swaps.insert(swaps.end(), last_swaps.begin(), last_swaps.end());
+        if(swaps.size() == 0) {
+            std::cerr << "Unexpected behaviour!\n";
+            return best_sol;
+        }
         sort(swaps.begin(), swaps.end(), [](auto &a, auto &b){
             return a.cmax < b.cmax;
         });
@@ -292,7 +290,8 @@ Solution_t beam_search(int setuptime, int batch_size, Solution_t best_sol,
             const auto& swap = swaps[i];
             last_swaps.push_back(swap);
             assert(old_winners_size > swap.sol_id);
-            auto sol = old_winners[swap.sol_id];
+            winners[winners_size] = old_winners[swap.sol_id];
+            auto& sol = winners[winners_size];
             perform_swap(sol.conf, swap.ids.first, swap.ids.second, swap.batch_ids.first, swap.batch_ids.second);
 
             int id1 = swap.ids.first;
@@ -309,7 +308,6 @@ Solution_t beam_search(int setuptime, int batch_size, Solution_t best_sol,
                 best_cmax_so_far = swap.cmax;
                 best_sol = sol.conf;
             }
-            winners[winners_size] = sol;
             winners_size += 1;
         }
     }
