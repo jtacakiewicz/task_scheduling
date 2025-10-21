@@ -9,7 +9,7 @@ logging.basicConfig()
 logger = logging.getLogger('dev')
 logger.setLevel(logging.DEBUG)
 
-STOP_ON_ERROR = False
+STOP_ON_ERROR = True
 CHECK_CMAX = True
 CHECK_K = True
 CHECK_NEGATIVE = True
@@ -108,6 +108,7 @@ def check_files(inp, out):
     if CHECK_CMAX and last_finish_time != cmax:
         logger.warning(f"Cmax_read: {cmax}, Cmax_calculated: {last_finish_time}")
         raise ValueError(f"calculated cmax does not match {last_finish_time} != {cmax}")
+    return cmax
 
 
 def main(in_file, out_file):
@@ -119,7 +120,8 @@ def main(in_file, out_file):
         with open(in_file, 'r') as f:
             check_in_file(f)
         with open(in_file, 'r') as inp, open(out_file, 'r') as out:
-            check_files(inp, out)
+            cmax = check_files(inp, out)
+            print(cmax)
     except ValueError as e:
         if STOP_ON_ERROR:
             raise ValueError(f"in {out_file}: {e}")
@@ -166,5 +168,4 @@ if __name__ == "__main__":
     except Exception as e:
         logger.error(f"Err: {e}")
         sys.exit(1)
-    finally:
-        sys.exit(0)
+    sys.exit(0)
