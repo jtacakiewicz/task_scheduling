@@ -34,7 +34,7 @@ int finish_time(const JobInfo &job) {
 #define MAX_WINNERS 30
 #define MAXN 500
 
-std::tuple<int,int,std::vector<JobInfo>> check_in_file(std::istream &inp) {
+std::tuple<int,int,std::vector<JobInfo>> load_in_file(std::istream &inp) {
     int n, setuptime, batch_size;
     inp >> n >> setuptime >> batch_size;
     fprintf(stderr, "n: %d; setup: %d; batch: %d\n", n, setuptime, batch_size);
@@ -63,7 +63,6 @@ Solution_t solve_greedy(int setuptime, int batch_size, const std::vector<JobInfo
     });
 
     int time = job_info[jobs.back()].ready;
-    std::cerr << "Time at the start: " << time << std::endl;
     Solution_t batches;
 
     while (!jobs.empty()) {
@@ -248,19 +247,21 @@ Solution_t beam_search(int setuptime, int batch_size, Solution_t best_sol,
     }
 
     std::vector<Swap> last_swaps;
-    int global_iter = 0;
+    int global_iter = 1;
     int best_cmax_so_far = calc_cmax(setuptime, batch_size, best_sol, job_info);
 
     while (true) {
         assert(winners_size != 0);
         auto now = std::chrono::steady_clock::now();
         double elapsed = std::chrono::duration<double>(now - start).count();
+        double sec_per_iter = elapsed/global_iter;
         if (elapsed > tune_time && iters_per_second == -1) {
             iters_per_second = global_iter / elapsed;
             std::cerr << "Search iterations per second: " << iters_per_second*(pick_winners*pick_rand) << std::endl;
         }
-        if (elapsed > time_limit)
+        if (elapsed+sec_per_iter*1.2>time_limit) {
             break;
+        }
         global_iter++;
 
         std::vector<Swap> swaps;
@@ -322,6 +323,7 @@ Solution_t beam_search(int setuptime, int batch_size, Solution_t best_sol,
 }
 
 int main(int argc, char **argv) {
+    auto start = std::chrono::steady_clock::now();
     if (argc < 4) {
         std::cerr << "Usage: " << argv[0] << " <input_file> <output_file> <time_limit_sec>" << std::endl;
         return 1;
@@ -331,13 +333,13 @@ int main(int argc, char **argv) {
     std::ofstream fout(argv[2]);
     double sec_limit = std::stod(argv[3]);
     if (!fin) {
-        std::cerr << "Error opening file." << std::endl;
+        std::cerr << "Error opening file: " << argv[1] << std::endl;
         return 1;
     }
 
     int setup, batch_s;
     std::vector<JobInfo> job_info;
-    tie(setup, batch_s, job_info) = check_in_file(fin);
+    tie(setup, batch_s, job_info) = load_in_file(fin);
 
     float avg_task = 0;
     for(auto j : job_info) {
@@ -347,13 +349,20 @@ int main(int argc, char **argv) {
 
     auto solution = solve_greedy(setup, batch_s, job_info);
     int cgreedy = calc_cmax(setup, batch_s, solution, job_info);
+
+    auto now = std::chrono::steady_clock::now();
+    double elapsed = std::chrono::duration<double>(now - start).count();
+    std::cerr << "Time spend up to beam search: " << elapsed << std::endl;
+    sec_limit -= elapsed;
+    sec_limit *= 0.95;
+
     std::cerr << "greedy solution: " << cgreedy  << std::endl;
     solution = beam_search(setup, batch_s, solution, job_info, sec_limit);
     int ctabu = calc_cmax(setup, batch_s, solution, job_info);
     std::cerr << "search solution: " << ctabu << std::endl;
     std::cerr << "search improvement: " << std::setprecision(2) << (cgreedy-ctabu)/avg_task*100 <<"% of a task\n";
 
-    fout << "0" << std::endl; // cmax
+    fout << ctabu << std::endl; // cmax
     fout << solution.size() << std::endl; // number of batches
     for (auto &b : solution) {
         for (int j : b)
