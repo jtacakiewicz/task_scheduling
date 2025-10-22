@@ -16,13 +16,14 @@
 
 typedef std::vector<std::vector<int>> Solution_t;
 
+typedef unsigned long long metric_t;
 struct JobInfo {
-    int ready;
-    int duration;
+    metric_t ready;
+    metric_t duration;
 };
 struct Swap {
     int sol_id;
-    int cmax;
+    metric_t cmax;
     std::pair<int, int> ids;
     std::pair<int, int> batch_ids;
 };
@@ -35,16 +36,16 @@ int finish_time(const JobInfo &job) {
 #define MAXN 500
 
 std::tuple<int,int,std::vector<JobInfo>> load_in_file(std::istream &inp) {
-    int n, setuptime, batch_size;
+    metric_t n, setuptime, batch_size;
     inp >> n >> setuptime >> batch_size;
-    fprintf(stderr, "n: %d; setup: %d; batch: %d\n", n, setuptime, batch_size);
+    fprintf(stderr, "n: %llu; setup: %llu; batch: %llu\n", n, setuptime, batch_size);
 
     if (n <= 0 || setuptime < 0 || batch_size <= 0)
         throw std::invalid_argument("Invalid input parameters");
 
     std::vector<JobInfo> job_info(n);
     for (int i = 0; i < n; i++) {
-        int processing_time, ready_time;
+        metric_t processing_time, ready_time;
         inp >> processing_time >> ready_time;
         if (processing_time < 0)
             throw std::invalid_argument("Processing time cannot be less than zero");
@@ -62,7 +63,7 @@ Solution_t solve_greedy(int setuptime, int batch_size, const std::vector<JobInfo
         return job_info[a].ready > job_info[b].ready;
     });
 
-    int time = job_info[jobs.back()].ready;
+    auto time = job_info[jobs.back()].ready;
     Solution_t batches;
 
     while (!jobs.empty()) {
@@ -76,8 +77,8 @@ Solution_t solve_greedy(int setuptime, int batch_size, const std::vector<JobInfo
             return job_info[a].duration < job_info[b].duration;
         });
 
-        int new_time = time;
-        int cur_batch_size = 0;
+        auto new_time = time;
+        auto cur_batch_size = 0;
         for (int job : potential) {
             if(cur_batch_size == batch_size)
                 break;
@@ -97,10 +98,10 @@ Solution_t solve_greedy(int setuptime, int batch_size, const std::vector<JobInfo
     return batches;
 }
 
-int calc_cmax(int setuptime, int batch_size, const Solution_t &batches, const std::vector<JobInfo> &job_info) {
-    int cmax = 0;
+metric_t calc_cmax(int setuptime, int batch_size, const Solution_t &batches, const std::vector<JobInfo> &job_info) {
+    metric_t cmax = 0;
     for (auto &batch : batches) {
-        int ready = 0, duration = 0;
+        metric_t ready = 0, duration = 0;
         for (int job : batch) {
             ready = std::max(ready, job_info[job].ready);
             duration = std::max(duration, job_info[job].duration);
@@ -212,7 +213,7 @@ std::vector<Swap> search_swaps(CensoredSolution& solution, int sol_id, int n, in
             continue;
 
         perform_swap(solution.conf, id1, id2, b1, b2);
-        int cmax = calc_cmax(setuptime, batch_size, solution.conf, job_info);
+        metric_t cmax = calc_cmax(setuptime, batch_size, solution.conf, job_info);
         perform_swap(solution.conf, id1, id2, b2, b1);
         local_swaps.push_back({sol_id, cmax, {id1, id2}, {b1, b2}});
         performed_swaps.insert(hash);
@@ -248,7 +249,7 @@ Solution_t beam_search(int setuptime, int batch_size, Solution_t best_sol,
 
     std::vector<Swap> last_swaps;
     int global_iter = 1;
-    int best_cmax_so_far = calc_cmax(setuptime, batch_size, best_sol, job_info);
+    metric_t best_cmax_so_far = calc_cmax(setuptime, batch_size, best_sol, job_info);
 
     while (true) {
         assert(winners_size != 0);
@@ -348,7 +349,7 @@ int main(int argc, char **argv) {
     avg_task /= job_info.size();
 
     auto solution = solve_greedy(setup, batch_s, job_info);
-    int cgreedy = calc_cmax(setup, batch_s, solution, job_info);
+    metric_t cgreedy = calc_cmax(setup, batch_s, solution, job_info);
 
     auto now = std::chrono::steady_clock::now();
     double elapsed = std::chrono::duration<double>(now - start).count();
@@ -358,7 +359,7 @@ int main(int argc, char **argv) {
 
     std::cerr << "greedy solution: " << cgreedy  << std::endl;
     solution = beam_search(setup, batch_s, solution, job_info, sec_limit);
-    int ctabu = calc_cmax(setup, batch_s, solution, job_info);
+    metric_t ctabu = calc_cmax(setup, batch_s, solution, job_info);
     std::cerr << "search solution: " << ctabu << std::endl;
     std::cerr << "search improvement: " << std::setprecision(2) << (cgreedy-ctabu)/avg_task*100 <<"% of a task\n";
 
