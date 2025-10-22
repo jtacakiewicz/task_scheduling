@@ -1,4 +1,5 @@
 #include <cassert>
+#include <cstdlib>
 #include <cstring>
 #include <iomanip>
 #include <iterator>
@@ -34,6 +35,7 @@ int finish_time(const JobInfo &job) {
 
 #define MAX_WINNERS 30
 #define MAXN 500
+#define INVALID_ID (MAXN*2)
 
 std::tuple<int,int,std::vector<JobInfo>> load_in_file(std::istream &inp) {
     metric_t n, setuptime, batch_size;
@@ -82,14 +84,15 @@ Solution_t solve_greedy(int setuptime, int batch_size, const std::vector<JobInfo
         for (int job : potential) {
             if(cur_batch_size == batch_size)
                 break;
-            if (job_info[job].ready > time)
+            if (job_info[job].ready > time) {
                 break;
+            }
             new_time = std::max(time + job_info[job].duration, new_time);
             batches.back().push_back(job);
             jobs.erase(remove(jobs.begin(), jobs.end(), job), jobs.end());
             cur_batch_size += 1;
         }
-        time = new_time + setuptime;
+        time = std::max(new_time + setuptime, job_info[*(jobs.begin() + left)].ready);
     }
 
     if (!batches.empty() && batches.back().empty())
@@ -108,7 +111,9 @@ metric_t calc_cmax(int setuptime, int batch_size, const Solution_t &batches, con
         }
         cmax = std::max(ready, cmax);
         cmax += duration;
-        cmax += setuptime;
+        if(batch.size() != 0) {
+            cmax += setuptime;
+        }
     }
     cmax -= setuptime;
     return cmax;
@@ -126,21 +131,13 @@ void perform_swap(Solution_t& solution, int id1, int id2, int b1, int b2) {
     *itr1 = *itr2;
     *itr2 = tmp;
 }
-
-bool good_swap(int id1, int id2, const std::vector<std::vector<bool>> &tabu_list) {
-    if (id1 == id2)
-        return false;
-    if (tabu_list[id1].size() > id2 && tabu_list[id1][id2])
-        return false;
-    else
-        return true;
-    return true;
-}
-
-void add_to_tabu(std::vector<std::vector<bool>> &tabu, int id1, int id2, int n) {
-    if (tabu[id1].empty())
-        tabu[id1].resize(n, false);
-    tabu[id1][id2] = true;
+void perform_move(Solution_t& solution, int id, int b1, int b2) {
+    auto& batchA = solution[b1];
+    auto& batchB = solution[b2];
+    auto itr = std::find(batchA.begin(), batchA.end(), id);
+    assert(itr != batchA.end());
+    batchA.erase(itr);
+    batchB.push_back(id);
 }
 
 //the higher the lambda the more close to the top the results will be
@@ -175,7 +172,47 @@ struct CensoredSolution {
 CensoredSolution old_winners[MAX_WINNERS];
 CensoredSolution winners[MAX_WINNERS];
 ThreadPool thread_pool;
-
+std::vector<Swap> search_moves(CensoredSolution& solution, int sol_id, int n, int global_iter, int tabu_ind, int tabu_batch, int setuptime, int batch_size, const std::vector<JobInfo> &job_info, int check_per_conf, std::mt19937::result_type seed) {
+    std::mt19937 gen(seed);
+    std::vector<Swap> local_swaps;
+    std::vector<int> batch_id(n, -1);
+    for (int i = 0; i < (int)solution.conf.size(); i++)
+        for (int job : solution.conf[i])
+            batch_id[job] = i;
+    std::vector<int> free_batches;
+    for (int i = 0; i < (int)solution.conf.size(); i++)
+        if(solution.conf[i].size() < batch_size)
+            free_batches.push_back(i);
+    check_per_conf *= free_batches.size();
+        
+    int tries = 0;
+    const int max_tries = check_per_conf * 100;
+    std::uniform_int_distribution<> id_rand(0, n - 1);
+    std::uniform_int_distribution<> batch_rand(0, free_batches.size() - 1);
+    std::unordered_set<int> performed_moves;
+    while(local_swaps.size() < check_per_conf && tries < max_tries && !free_batches.empty()) {
+        ++tries;
+        int id = id_rand(gen);
+        auto b = batch_id[id];
+        int b_other = batch_rand(gen);
+        b_other = free_batches[b_other];
+        auto hash = (id * 7631563) ^ (b_other*5928253);
+        if(b == b_other) {
+            continue;
+        }
+        if(performed_moves.find(hash) != performed_moves.end()) {
+            continue;
+        }
+        performed_moves.insert(hash);
+        //perform swap
+        perform_move(solution.conf, id, b, b_other);
+        auto cmax = calc_cmax(setuptime, batch_size, solution.conf, job_info);
+        //roll back
+        perform_move(solution.conf, id, b_other, b);
+        local_swaps.push_back({sol_id, cmax, {id, INVALID_ID}, {b, b_other}});
+    }
+    return local_swaps;
+}
 std::vector<Swap> search_swaps(CensoredSolution& solution, int sol_id, int n, int global_iter, int tabu_ind, int tabu_batch, int setuptime, int batch_size, const std::vector<JobInfo> &job_info, int check_per_conf, std::mt19937::result_type seed) {
     std::mt19937 gen(seed);
     std::vector<Swap> local_swaps;
@@ -189,7 +226,7 @@ std::vector<Swap> search_swaps(CensoredSolution& solution, int sol_id, int n, in
     int found = 0;
     std::uniform_int_distribution<> dist(0, n - 1);
 
-    std::unordered_set<int> performed_swaps;
+
     while (found < check_per_conf && tries < max_tries) {
         ++tries;
         int id1 = dist(gen);
@@ -216,14 +253,12 @@ std::vector<Swap> search_swaps(CensoredSolution& solution, int sol_id, int n, in
         metric_t cmax = calc_cmax(setuptime, batch_size, solution.conf, job_info);
         perform_swap(solution.conf, id1, id2, b2, b1);
         local_swaps.push_back({sol_id, cmax, {id1, id2}, {b1, b2}});
-        performed_swaps.insert(hash);
         ++found;
     }
-    assert(found != 0);
     return local_swaps;
 }
 
-Solution_t beam_search(int setuptime, int batch_size, Solution_t best_sol,
+Solution_t beam_search(const int setuptime, const int batch_size, Solution_t best_sol,
                                 const std::vector<JobInfo> &job_info, double time_limit=5,
                                 int pick_winners=3, int pick_rand=5)
 {
@@ -235,6 +270,7 @@ Solution_t beam_search(int setuptime, int batch_size, Solution_t best_sol,
     int tabu_dur = n;
     int tabu_batch_dur = best_sol.size();
     int check_per_conf = n * 2;
+    int move_checks = check_per_conf * 0.1;
 
     int old_winners_size = 0;
     int winners_size = 1;
@@ -272,8 +308,10 @@ Solution_t beam_search(int setuptime, int batch_size, Solution_t best_sol,
             auto seed = gen();
             thread_pool.addTask([&, sol_id, seed]() {
                 auto lswaps = search_swaps(winners[sol_id], sol_id, n, global_iter, tabu_dur, tabu_batch_dur, setuptime, batch_size, job_info, check_per_conf, seed);
+                auto lmoves = search_moves(winners[sol_id], sol_id, n, global_iter, tabu_dur, tabu_batch_dur, setuptime, batch_size, job_info, move_checks, seed);
                 swaps_results_mut.lock();
                 swaps.insert(swaps.end(), lswaps.begin(), lswaps.end());
+                swaps.insert(swaps.end(), lmoves.begin(), lmoves.end());
                 swaps_results_mut.unlock();
             });
         }
@@ -300,16 +338,24 @@ Solution_t beam_search(int setuptime, int batch_size, Solution_t best_sol,
             assert(old_winners_size > swap.sol_id);
             winners[winners_size] = old_winners[swap.sol_id];
             auto& sol = winners[winners_size];
-            perform_swap(sol.conf, swap.ids.first, swap.ids.second, swap.batch_ids.first, swap.batch_ids.second);
-
-            int id1 = swap.ids.first;
-            int id2 = swap.ids.second;
-            int b1 = swap.batch_ids.first;
-            int b2 = swap.batch_ids.second;
-            auto bX = std::max(b1, b2);
-            auto bM = std::min(b1, b2);
-            sol.tabu_ind[id1*MAXN+id2] = global_iter;
-            sol.tabu_batch[bM*MAXN+bX] = global_iter;
+            if(swap.ids.second != INVALID_ID) {
+                perform_swap(sol.conf, swap.ids.first, swap.ids.second, swap.batch_ids.first, swap.batch_ids.second);
+                int id1 = swap.ids.first;
+                int id2 = swap.ids.second;
+                int b1 = swap.batch_ids.first;
+                int b2 = swap.batch_ids.second;
+                auto bX = std::max(b1, b2);
+                auto bM = std::min(b1, b2);
+                sol.tabu_ind[id1*MAXN+id2] = global_iter;
+                sol.tabu_batch[bM*MAXN+bX] = global_iter;
+            }else if (swap.batch_ids.second != INVALID_ID) {
+                perform_move(sol.conf, swap.ids.first, swap.batch_ids.first, swap.batch_ids.second);
+                if(sol.conf[swap.batch_ids.first].size() == 0) {
+                    auto itr = sol.conf.begin() + swap.batch_ids.first;
+                    assert(itr->size() == 0);
+                    sol.conf.erase(itr);
+                }
+            }
 
             if (swap.cmax < best_cmax_so_far) {
                 std::cerr << "New best: " << swap.cmax << std::endl;
