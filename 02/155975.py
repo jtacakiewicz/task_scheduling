@@ -82,6 +82,7 @@ parser = argparse.ArgumentParser(
 
 parser.add_argument('in_file', help='input file.')
 parser.add_argument('out_file', help='output file.')
+parser.add_argument('time_limit', help='time limit.')
 
 args = parser.parse_args()
 with open(args.in_file, "r") as inp:
