@@ -11,7 +11,10 @@ logger.setLevel(logging.DEBUG)
 
 MACHINE_COUNT = 5
 
+ANY_ERROR = False
+
 def validate_in(inp):
+    global ANY_ERROR
     first_line = next(inp).split()
     n = int(first_line[0])
     jobs = {}
@@ -21,19 +24,24 @@ def validate_in(inp):
         rdy = int(params[1])
         due = int(params[2])
         if dur <= 0:
+            ANY_ERROR = True
             logger.warning(f"Job {i+1} has invalid duration: {dur}")
         if rdy < 0:
+            ANY_ERROR = True
             logger.warning(f"Job {i+1} has invalid ready time: {rdy}")
         if rdy+dur > due:
+            ANY_ERROR = True
             logger.warning(f"Job {i+1} is undoable in these requirements")
         jobs[i+1] = (dur, rdy, due)
 
     if len(jobs) != n:
+        ANY_ERROR = True
         logger.error(f"Input file did not describe all jobs ({len(jobs)})")
 
     return n, jobs
 
 def validate_out(out, n):
+    global ANY_ERROR
     first_line = next(out).split()
     U = int(first_line[0])
     machines = []
@@ -42,22 +50,27 @@ def validate_out(out, n):
         machines.append([])
         for job in line.split():
             if job in jobs_proc:
+                ANY_ERROR = True
                 logger.warning(f"Job {job} has been used twice")
             jobs_proc.add(job)
             machines[-1].append(job)
     if len(machines) > MACHINE_COUNT:
+        ANY_ERROR = True
         logger.error(f"Too many machines: {len(machines)}")
     if len(jobs_proc) != n:
+        ANY_ERROR = True
         logger.error(f"Incorrect amount of jobs used: {len(jobs_proc)}/{n}")
     return U, machines
 
 def validate_solution(solution, job_info, U_exp):
+    global ANY_ERROR
     U = 0
     for machine in solution:
         last_end = 0
         for job in machine:
             job = int(job)
             if job not in job_info:
+                ANY_ERROR = True
                 logger.error(f"Job used in solution does not exist: {job}")
                 continue;
 
@@ -72,7 +85,9 @@ def validate_solution(solution, job_info, U_exp):
             this_end = last_end + dur
             if this_end > due:
                 U += 1
+            last_end = this_end
     if U != U_exp:
+        ANY_ERROR = True
         logger.warning(f"Calculated U is different: {U} != {U_exp}")
 
     return U
@@ -94,3 +109,5 @@ with open(args.in_file, "r") as inp:
         n, job_info = validate_in(inp)
         U, sol = validate_out(out, n)
         validate_solution(sol, job_info, U)
+if ANY_ERROR:
+    sys.exit(1);
