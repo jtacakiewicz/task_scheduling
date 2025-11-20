@@ -33,13 +33,10 @@ def validate_in(inp):
 
     return n, jobs
 
-def solve_greedy(n, job_info, coef = 1):
+def solve_greedy(n, job_info):
     jobs = []
     for id, info in job_info.items():
         jobs.append((id, *info))
-    avg_dur = 0
-    durations = map(lambda x: x[1], jobs)
-    avg_dur = sum(durations) / n
 
     jobs.sort(key=lambda x: x[-1])
     machine_time = [0] * MACHINE_COUNT
@@ -47,11 +44,7 @@ def solve_greedy(n, job_info, coef = 1):
     U = 0
     completion_times = [0] * (n + 1)
 
-    to_reapply = []
     for job_id, dur, rdy, due in jobs:
-        if dur > avg_dur * coef:
-            to_reapply.append(job_id)
-            continue;
         best_machine = None
         best_start = None
 
@@ -70,9 +63,6 @@ def solve_greedy(n, job_info, coef = 1):
 
         if finish > due:
             U += 1
-    for id in to_reapply:
-        machine_jobs[0].append(id)
-        U += 1
     return U, machine_jobs
 
 
@@ -88,12 +78,10 @@ with open(args.in_file, "r") as inp:
     n, job_info = validate_in(inp)
     best_sol = None
     best_U = None
-    for coef_int in range(0, 5000):
-        coef = coef_int / 1000
-        U, sol = solve_greedy(n, job_info, coef)
-        if best_U is None or U < best_U:
-            best_U = U
-            best_sol = sol
+    U, sol = solve_greedy(n, job_info)
+    if best_U is None or U < best_U:
+        best_U = U
+        best_sol = sol
 
     with open(args.out_file, "w") as out:
         out.write(str(best_U) + '\n')
