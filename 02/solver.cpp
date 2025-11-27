@@ -340,7 +340,7 @@ std::pair<int, JobID_t> tryAddOneWithPopping(std::vector<JobID_t> machine, JobID
             machine.insert(machine.begin() + to_pop, elem);
         }
         machine.erase(machine.begin() + next_idx);
-        if(next_idx == machine.size()) {
+        if(next_idx >= machine.size()) {
             break;
         }
         next_time = std::max(next_time, job_info[machine[next_idx]].ready);
@@ -359,25 +359,49 @@ int calcU(const Config_t& sol, const std::vector<JobInfo>& job_info) {
 }
 
 Config_t tryReadd(Config_t& partial, std::vector<JobID_t> to_readd, const std::vector<JobInfo>& job_info) {
-    std::set<JobID_t> added;
-    for(auto& machine : partial) {
-        for(auto j : to_readd) {
-            if(added.find(j) != added.end()) {
-                continue;
-            }
-            auto idx = tryAddOne(machine, j, job_info);
-            if(idx != -1) {
-                machine.insert(machine.begin() + idx, j);
-                added.insert(j);
-                assert(findTardy(machine, job_info) == 0);
+    auto prev_readd = to_readd;
+    do {
+        prev_readd = to_readd;
+        std::set<JobID_t> added;
+        for(auto& machine : partial) {
+            for(auto j : to_readd) {
+                if(added.find(j) != added.end())
+                    continue;
+                auto idx = tryAddOne(machine, j, job_info);
+                if(idx != -1) {
+                    machine.insert(machine.begin() + idx, j);
+                    added.insert(j);
+                    assert(findTardy(machine, job_info) == 0);
+                }
             }
         }
-    }
-    for(auto j : added) {
-        auto itr = std::find(to_readd.begin(), to_readd.end(), j);
-        to_readd.erase(itr);
-    }
-    added.clear();
+        for(auto j : added) {
+            auto itr = std::find(to_readd.begin(), to_readd.end(), j);
+            to_readd.erase(itr);
+        }
+        added.clear();
+        std::vector<JobID_t> to_readd_pp;
+        for(auto& machine : partial) {
+            for(auto j : to_readd) {
+                if(added.find(j) != added.end())
+                    continue;
+                auto idx = tryAddOneWithPopping(machine, j, job_info);
+                if(idx.first != -1) {
+                    auto itr = std::find(machine.begin(), machine.end(), idx.second);
+                    machine.erase(itr);
+                    machine.insert(machine.begin() + idx.first, j);
+                    added.insert(j);
+                    to_readd_pp.push_back(idx.second);
+                    assert(findTardy(machine, job_info) == 0);
+                }
+            }
+        }
+        for(auto j : added) {
+            auto itr = std::find(to_readd.begin(), to_readd.end(), j);
+            to_readd.erase(itr);
+        }
+        for(auto j : to_readd_pp) to_readd.push_back(j);
+    }while(prev_readd != to_readd);
     for(auto j : to_readd) {
         partial[0].push_back(j);
     }
