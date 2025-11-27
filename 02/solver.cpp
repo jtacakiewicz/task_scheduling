@@ -1,5 +1,6 @@
 #include <cassert>
 #include <array>
+#include <iterator>
 #include <numeric>
 #include <random>
 #include <set>
@@ -312,6 +313,41 @@ int tryAddOne(std::vector<JobID_t> machine, JobID_t to_readd, const std::vector<
         next_idx += 1;
     }
     return -1;
+}
+std::pair<int, JobID_t> tryAddOneWithPopping(std::vector<JobID_t> machine, JobID_t to_readd, const std::vector<JobInfo>& job_info) {
+    metric_t time = 0;
+    auto next_time = time;
+    int next_idx = 0;
+    auto & job = job_info[to_readd];
+    while(next_time < job.ready && next_idx < machine.size()) {
+        time = next_time;
+        next_time = std::max(next_time, job_info[machine[next_idx]].ready);
+        next_time += job_info[machine[next_idx]].duration;
+        next_idx += 1;
+    }
+    while(next_idx < machine.size() && next_time < job.due) {
+        machine.insert(machine.begin() + next_idx, to_readd);
+        for(int to_pop = next_idx+1;next_idx < machine.size(); next_idx++) {
+            auto elem = machine[to_pop];
+            if(job_info[elem].duration <= job.duration)
+                continue;
+
+            machine.erase(machine.begin() + to_pop);
+            auto tardy = findTardy(machine, job_info);
+            if(tardy == 0) {
+                return {next_idx, elem};
+            }
+            machine.insert(machine.begin() + to_pop, elem);
+        }
+        machine.erase(machine.begin() + next_idx);
+        if(next_idx == machine.size()) {
+            break;
+        }
+        next_time = std::max(next_time, job_info[machine[next_idx]].ready);
+        next_time += job_info[machine[next_idx]].duration;
+        next_idx += 1;
+    }
+    return {-1, 0};
 }
 
 int calcU(const Config_t& sol, const std::vector<JobInfo>& job_info) {
