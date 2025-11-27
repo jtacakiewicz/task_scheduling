@@ -2,8 +2,6 @@
 
 instances="154978"
 solvers="154978 155826 155851 155866 155868 155891 155892 155905 155913 155954 155958 155963 155967 155975 156010 156029"
-instances=$solvers
-solvers="155975"
 for instance in $instances; do
     for idx in $solvers; do
         echo "=============== Solver ${idx} ==============="
