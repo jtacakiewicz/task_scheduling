@@ -133,7 +133,7 @@ long long evaluate_schedule(const ProblemData& data, const vector<int>& schedule
 
     return total_tardiness;
 }
-void generate_instance(const string& filename, size_t n, int P_DEV_MAX = 25, int P_MAX = 50, int S_MAX = 10, double WSP_TARDY = 1.2, int U_TARGET = 69) {
+void generate_instance(const string& filename, size_t n, int P_DEV_MAX = 15, int P_MAX = 50, int S_MAX = 10, double WSP_TARDY = 1.2, int U_TARGET = 420) {
     if (n <= 0) {
         throw invalid_argument("Liczba zadań (n) musi być większa od 0.");
     }
@@ -181,15 +181,27 @@ void generate_instance(const string& filename, size_t n, int P_DEV_MAX = 25, int
         }
         end_times[i] = cur_times.back();
         due_dates[i] = end_times[i];
-        if (i % 2 == 0) {
+        if (i % 2 == 1) {
             due_dates[i] = end_times[i] - U_SHARE;
-            if (i != 0) {
-                due_dates[i-1] = end_times[i] + 1;
-            }else {
-                due_dates[i] -= U_LEFTOVER;
-            }
+            due_dates[i-1] = end_times[i] + 1;
+            setup_times[i][i-1] = max(setup_times[i-1][i], setup_times[i][i-1]) + U_SHARE;
         }
     }
+    if ((n/2) % 2 == 1) {
+        due_dates[n/2] -= U_LEFTOVER;
+    }else {
+        due_dates[n/2-1] -= U_LEFTOVER;
+    }
+
+    uniform_int_distribution<int> p_index(0, n/2);
+    for(int i = 0; i < n/50; i++) {
+        int a = p_index(generator);
+        int b = p_index(generator);
+        if(a*2 >= n || b*2 >= n)
+            continue;
+        due_dates[a*2] = std::max(due_dates[a*2], due_dates[b*2]);
+    }
+
     vector<int> p_indices(n);
     vector<int> p_indices_rev(n);
     for (int i = 0; i < n; ++i) {
@@ -234,7 +246,7 @@ void generate_instance(const string& filename, size_t n, int P_DEV_MAX = 25, int
         throw runtime_error("Nie można utworzyć pliku opt");
     }
     outfile_sol.seekp(0);
-    outfile_sol << n << endl;
+    outfile_sol << U_TARGET << endl;
     for (int i = 0; i < n; ++i) {
         outfile_sol << p_indices_rev[i]+1 << " ";
     }
