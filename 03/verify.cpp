@@ -275,10 +275,10 @@ int main(int argc, char* argv[]) {
             cout << "Obliczone D:   " << actual_tardiness << endl;
 
             if (actual_tardiness == expected_tardiness) {
-                cout << "\n✅ WERYFIKACJA ZAKOŃCZONA POWODZENIEM!" << endl;
+                cout << "\nSUCCESS!" << endl;
                 return 0;
             } else {
-                cout << "\nx WERYFIKACJA ZAKOŃCZONA NIEPOWODZENIEM!" << endl;
+                cout << "\nFAILURE!" << endl;
                 cout << "Wartość D w pliku wynikowym (" << expected_tardiness 
                      << ") NIE ZGADZA SIĘ z obliczoną wartością (" << actual_tardiness << ")." << endl;
                 return 2;
