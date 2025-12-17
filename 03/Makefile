@@ -19,6 +19,8 @@ CXXFLAGS = -std=c++17 -Wall -O2
 # Cel domyślny: kompilacja programu
 all: $(SOLVER_EXECUTABLE) $(EXECUTABLE)
 
+$(EXECUTABLE): $(SOURCE)
+	$(CXX) $(CXXFLAGS) -o $@ $^
 $(SOLVER_EXECUTABLE): $(SOLVER_SOURCE)
 	$(CXX) $(CXXFLAGS) -o $@ $^
 build: $(SOLVER_EXECUTABLE) $(EXECUTABLE)

@@ -12,13 +12,13 @@
 
 using namespace std;
 
-const int NUM_MACHINES = 5;
+const long long NUM_MACHINES = 5;
 
 struct ProblemData {
     size_t n;
-    vector<vector<int>> processing_times;
-    vector<int> due_dates;
-    vector<vector<int>> setup_times;
+    vector<vector<long long>> processing_times;
+    vector<long long> due_dates;
+    vector<vector<long long>> setup_times;
 };
 
 void read_instance_file(const string& filename, ProblemData& data) {
@@ -31,7 +31,7 @@ void read_instance_file(const string& filename, ProblemData& data) {
         throw runtime_error("Błąd wczytywania liczby zamówień (n). Plik: " + filename);
     }
 
-    data.processing_times.resize(data.n, vector<int>(NUM_MACHINES));
+    data.processing_times.resize(data.n, vector<long long>(NUM_MACHINES));
     data.due_dates.resize(data.n);
 
     for (size_t i = 0; i < data.n; ++i) {
@@ -45,7 +45,7 @@ void read_instance_file(const string& filename, ProblemData& data) {
         }
     }
 
-    data.setup_times.resize(data.n, vector<int>(data.n));
+    data.setup_times.resize(data.n, vector<long long>(data.n));
     for (size_t i = 0; i < data.n; ++i) {
         for (size_t j = 0; j < data.n; ++j) {
             if (!(infile >> data.setup_times[i][j])) {
@@ -55,7 +55,7 @@ void read_instance_file(const string& filename, ProblemData& data) {
     }
     infile.close();
 }
-void read_result_file(const string& filename, size_t n, long long& expected_total_tardiness, vector<int>& schedule) {
+void read_result_file(const string& filename, size_t n, long long& expected_total_tardiness, vector<long long>& schedule) {
     ifstream outfile(filename);
     if (!outfile.is_open()) {
         throw runtime_error("Nie można otworzyć pliku wynikowego (out): " + filename);
@@ -69,7 +69,7 @@ void read_result_file(const string& filename, size_t n, long long& expected_tota
     string job_id_str;
     while (outfile >> job_id_str) {
         try {
-            int job_index_1based = stoi(job_id_str);
+            long long job_index_1based = stoi(job_id_str);
             if (job_index_1based < 1 || job_index_1based > n) {
                 throw runtime_error("Indeks zadania poza zakresem (1 do " + to_string(n) + "): J" + to_string(job_index_1based));
             }
@@ -83,9 +83,9 @@ void read_result_file(const string& filename, size_t n, long long& expected_tota
         throw runtime_error("Błąd: Wczytano " + to_string(schedule.size()) + " zadań, oczekiwano " + to_string(n) + ".");
     }
     
-    vector<int> check_sequence = schedule;
+    vector<long long> check_sequence = schedule;
     sort(check_sequence.begin(), check_sequence.end());
-    for(int i = 0; i < n; ++i) {
+    for(long long i = 0; i < n; ++i) {
         if(check_sequence[i] != i) {
             throw runtime_error("Błąd: Sekwencja musi zawierać każde zadanie J1 do J" + to_string(n) + " dokładnie raz. (J" + to_string(i) + ")");
         }
@@ -93,16 +93,16 @@ void read_result_file(const string& filename, size_t n, long long& expected_tota
 
     outfile.close();
 }
-long long evaluate_schedule(const ProblemData& data, const vector<int>& schedule) {
+long long evaluate_schedule(const ProblemData& data, const vector<long long>& schedule) {
     if (schedule.size() != data.n) { return -1; }
 
     vector<vector<long long>> C(NUM_MACHINES, vector<long long>(data.n, 0));
 
-    for (int k = 0; k < data.n; ++k) {
-        int current_job_idx = schedule[k]; 
-        int previous_job_idx = (k > 0) ? schedule[k - 1] : -1; 
+    for (long long k = 0; k < data.n; ++k) {
+        long long current_job_idx = schedule[k]; 
+        long long previous_job_idx = (k > 0) ? schedule[k - 1] : -1; 
 
-        for (int m = 0; m < NUM_MACHINES; ++m) {
+        for (long long m = 0; m < NUM_MACHINES; ++m) {
             
             long long prev_finish_time_on_M = (k == 0) ? 0 : C[m][k - 1];
             
@@ -122,8 +122,8 @@ long long evaluate_schedule(const ProblemData& data, const vector<int>& schedule
 
     long long total_tardiness = 0;
     
-    for (int k = 0; k < data.n; ++k) {
-        int job_idx = schedule[k]; 
+    for (long long k = 0; k < data.n; ++k) {
+        long long job_idx = schedule[k]; 
         long long Cj = C[NUM_MACHINES - 1][k]; 
         long long dj = data.due_dates[job_idx]; 
         
@@ -133,7 +133,7 @@ long long evaluate_schedule(const ProblemData& data, const vector<int>& schedule
 
     return total_tardiness;
 }
-void generate_instance(const string& filename, size_t n, int P_DEV_MAX = 15, int P_MAX = 50, int S_MAX = 10, double WSP_TARDY = 1.2, int U_TARGET = 420) {
+void generate_instance(const string& filename, size_t n, long long P_DEV_MAX = 15, long long P_MAX = 50, long long S_MAX = 10, double WSP_TARDY = 1.2, long long U_TARGET = 420) {
     if (n <= 0) {
         throw invalid_argument("Liczba zadań (n) musi być większa od 0.");
     }
@@ -144,34 +144,34 @@ void generate_instance(const string& filename, size_t n, int P_DEV_MAX = 15, int
         throw runtime_error("Nie można utworzyć pliku wyjściowego: " + filename);
     }
 
-    mt19937 generator(static_cast<unsigned int>(time(0)));
-    uniform_int_distribution<int> p_dev_dist(-P_DEV_MAX/2, P_DEV_MAX/2);
-    uniform_int_distribution<int> p_dist(1, P_MAX);
-    uniform_int_distribution<int> s_dist(0, S_MAX);
+    mt19937 generator(static_cast<unsigned long long>(time(0)));
+    uniform_int_distribution<long long> p_dev_dist(-P_DEV_MAX/2, P_DEV_MAX/2);
+    uniform_int_distribution<long long> p_dist(1, P_MAX);
+    uniform_int_distribution<long long> s_dist(0, S_MAX);
     
-    vector<vector<int>> processing_times(n, vector<int>(NUM_MACHINES));
-    vector<vector<int>> setup_times(n, vector<int>(n));
-    for (int i = 0; i < n; ++i) {
-        for (int j = 0; j < n; ++j) {
-            int setup_time = s_dist(generator);
+    vector<vector<long long>> processing_times(n, vector<long long>(NUM_MACHINES));
+    vector<vector<long long>> setup_times(n, vector<long long>(n));
+    for (long long i = 0; i < n; ++i) {
+        for (long long j = 0; j < n; ++j) {
+            long long setup_time = s_dist(generator);
             setup_times[i][j] = (i == j) ? 0 : setup_time;
         }
     }
-    int U_SHARE = U_TARGET / (n / 2);
-    int U_LEFTOVER = U_TARGET - U_SHARE * (n / 2);
+    long long U_SHARE = U_TARGET / (n / 2);
+    long long U_LEFTOVER = U_TARGET - U_SHARE * (n / 2);
 
-    vector<int> due_dates(n);
+    vector<long long> due_dates(n);
 
-    vector<int> cur_times(NUM_MACHINES, 0);
-    vector<int> end_times(n, 0);
-    for (int i = 0; i < n; ++i) {
-        int prev_av_time = 0;
-        for (int m = 0; m < NUM_MACHINES; ++m) {
+    vector<long long> cur_times(NUM_MACHINES, 0);
+    vector<long long> end_times(n, 0);
+    for (long long i = 0; i < n; ++i) {
+        long long prev_av_time = 0;
+        for (long long m = 0; m < NUM_MACHINES; ++m) {
             if(i == 0 || m == NUM_MACHINES - 1) {
                 processing_times[i][m] = p_dist(generator);
             }else {
-                int base = processing_times[i-1][m+1];
-                processing_times[i][m] = max(base + p_dev_dist(generator), 1);
+                long long base = processing_times[i-1][m+1];
+                processing_times[i][m] = max<long long>(base + p_dev_dist(generator), 1);
             }
             if(i != 0)
                 cur_times[m] += setup_times[i-1][i];
@@ -193,29 +193,29 @@ void generate_instance(const string& filename, size_t n, int P_DEV_MAX = 15, int
         due_dates[n/2-1] -= U_LEFTOVER;
     }
 
-    uniform_int_distribution<int> p_index(0, n/2);
-    for(int i = 0; i < n/50; i++) {
-        int a = p_index(generator);
-        int b = p_index(generator);
+    uniform_int_distribution<long long> p_index(0, n/2);
+    for(long long i = 0; i < n/50; i++) {
+        long long a = p_index(generator);
+        long long b = p_index(generator);
         if(a*2 >= n || b*2 >= n)
             continue;
         due_dates[a*2] = std::max(due_dates[a*2], due_dates[b*2]);
     }
 
-    vector<int> p_indices(n);
-    vector<int> p_indices_rev(n);
-    for (int i = 0; i < n; ++i) {
+    vector<long long> p_indices(n);
+    vector<long long> p_indices_rev(n);
+    for (long long i = 0; i < n; ++i) {
         p_indices[i] = i;
     }
     shuffle(p_indices.begin(), p_indices.end(), generator);
-    for (int i = 0; i < n; ++i) {
+    for (long long i = 0; i < n; ++i) {
         p_indices_rev[p_indices[i]] = i;
     }
-    vector<vector<int>> processing_times_shuffled(n, vector<int>(NUM_MACHINES));
-    vector<int> due_dates_shuffled(n);
+    vector<vector<long long>> processing_times_shuffled(n, vector<long long>(NUM_MACHINES));
+    vector<long long> due_dates_shuffled(n);
 
-    for (int i = 0; i < n; ++i) {
-        int original_index = p_indices[i];
+    for (long long i = 0; i < n; ++i) {
+        long long original_index = p_indices[i];
         processing_times_shuffled[i] = processing_times[original_index];
         due_dates_shuffled[i] = due_dates[original_index];
     }
@@ -223,19 +223,19 @@ void generate_instance(const string& filename, size_t n, int P_DEV_MAX = 15, int
     outfile.seekp(0);
     outfile << n << endl;
     
-    for (int i = 0; i < n; ++i) {
-        for (int m = 0; m < NUM_MACHINES; ++m) {
+    for (long long i = 0; i < n; ++i) {
+        for (long long m = 0; m < NUM_MACHINES; ++m) {
             outfile << processing_times_shuffled[i][m] << " ";
         }
         outfile << due_dates_shuffled[i] << endl; 
     }
 
-    for (int i = 0; i < n; ++i) {
-        int original_i = p_indices[i];
+    for (long long i = 0; i < n; ++i) {
+        long long original_i = p_indices[i];
         
-        for (int j = 0; j < n; ++j) {
-            int original_j = p_indices[j];
-            int mapped_setup_time = setup_times[original_i][original_j]; 
+        for (long long j = 0; j < n; ++j) {
+            long long original_j = p_indices[j];
+            long long mapped_setup_time = setup_times[original_i][original_j]; 
             outfile << mapped_setup_time << (j == n - 1 ? "" : " ");
         }
         outfile << endl;
@@ -247,7 +247,7 @@ void generate_instance(const string& filename, size_t n, int P_DEV_MAX = 15, int
     }
     outfile_sol.seekp(0);
     outfile_sol << U_TARGET << endl;
-    for (int i = 0; i < n; ++i) {
+    for (long long i = 0; i < n; ++i) {
         outfile_sol << p_indices_rev[i]+1 << " ";
     }
     outfile_sol.close();
@@ -265,7 +265,7 @@ int main(int argc, char* argv[]) {
             read_instance_file(instance_file, data);
 
             long long expected_tardiness;
-            vector<int> schedule;
+            vector<long long> schedule;
             read_result_file(result_file, data.n, expected_tardiness, schedule);
 
             long long actual_tardiness = evaluate_schedule(data, schedule);
