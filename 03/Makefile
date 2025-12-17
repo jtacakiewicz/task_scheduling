@@ -4,6 +4,9 @@ SOURCE = verify.cpp
 # Nazwa pliku wykonywalnego
 EXECUTABLE = weryfikator
 
+SOLVER_SOURCE = solver.cpp
+SOLVER_EXECUTABLE = solver
+
 # Kompilator
 CXX = g++
 
@@ -14,11 +17,11 @@ CXX = g++
 CXXFLAGS = -std=c++17 -Wall -O2
 
 # Cel domyślny: kompilacja programu
-all: $(EXECUTABLE)
+all: $(SOLVER_EXECUTABLE) $(EXECUTABLE)
 
-$(EXECUTABLE): $(SOURCE)
+$(SOLVER_EXECUTABLE): $(SOLVER_SOURCE)
 	$(CXX) $(CXXFLAGS) -o $@ $^
-build: $(EXECUTABLE)
+build: $(SOLVER_EXECUTABLE) $(EXECUTABLE)
 
 # Cel do czyszczenia skompilowanych plików
 clean:
@@ -31,7 +34,7 @@ clean:
 # Cel do generowania przykładowej instancji (10 zadań)
 generate_ex: $(EXECUTABLE)
 	@echo "--- Generowanie przykładowej instancji (10 zadań) do test.in ---"
-	./$(EXECUTABLE) generate test.in 5
+	./$(EXECUTABLE) generate test.in 50
 
 # Cel do weryfikacji przykładowego wyniku
 # UWAGA: Ten cel wymaga, aby plik test.out istniał i zawierał poprawną sekwencję
@@ -47,5 +50,15 @@ verify_ex: $(EXECUTABLE)
 	    echo "1 2 3 4 5" >> test.out; \
 	fi
 	./$(EXECUTABLE) test.in test.out
+
+solver_ex: $(SOLVER_EXECUTABLE)
+	@echo "--- Uruchamianie SOLVERA na instancji test.in i zapisywanie wyniku do test.out ---"
+	@if [ ! -f test.in ]; then \
+		echo "BŁĄD: Plik test.in nie istnieje. Najpierw uruchom 'make generate_ex'."; \
+	else \
+		./$(SOLVER_EXECUTABLE) test.in test.out; \
+		./$(EXECUTABLE) test.in test.out; \
+		./$(EXECUTABLE) test.in out/out_50.txt; \
+	fi
 
 .PHONY: all clean generate verify
