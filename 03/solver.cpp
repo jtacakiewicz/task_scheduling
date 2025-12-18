@@ -196,7 +196,7 @@ int main(int argc, char* argv[]) {
 
     string input_file = argv[1];
     string output_file = argv[2];
-    int time_limit = stoi(argv[3]);
+    int time_limit = stoi(argv[3])/2+1;
 
     FlowShopSolver solver;
     if (solver.load_data(input_file)) {
