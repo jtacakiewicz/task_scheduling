@@ -4,6 +4,7 @@
 #include <fstream>
 #include <iostream>
 #include <numeric>
+#include <random>
 #include <sstream>
 #include <vector>
 
@@ -24,7 +25,9 @@ private:
     vector<JobData> all_jobs;
     vector<vector<unsigned long long>> setup_times;
     const int MAX_ITERATIONS = 1000000;
-    pair<unsigned long long, vector<unsigned long long>> calculate_total_tardiness(const vector<int> &sequence) {
+    mt19937 rng{2137};
+
+    pair<unsigned long long, vector<unsigned long long>> get_tardiness(const vector<int> &sequence) {
         int seq_size = sequence.size();
         vector<vector<unsigned long long>> C(NUM_MACHINES, vector<unsigned long long>(seq_size, 0));
         unsigned long long total_tardiness = 0;
@@ -48,6 +51,92 @@ private:
             if (finish_time > due) total_tardiness += (finish_time - due);
         }
         return {total_tardiness, C[NUM_MACHINES - 1]};
+    }
+
+    void insert_best(vector<int>& seq, int job) {
+        int best_pos = 0;
+        unsigned long long min_d = -1; // max
+
+        for (int i = 0; i <= seq.size(); ++i) {
+            seq.insert(seq.begin() + i, job);
+            unsigned long long d = get_tardiness(seq).first;
+            if (d < min_d) {
+                min_d = d;
+                best_pos = i;
+            }
+            seq.erase(seq.begin() + i);
+        }
+        seq.insert(seq.begin() + best_pos, job);
+    }
+    void adjacent_local_search(vector<int>& seq, unsigned long long& current_d) {
+        bool improved = true;
+        while (improved) {
+            improved = false;
+            for (int i = 0; i < (int)seq.size() - 1; ++i) {
+                swap(seq[i], seq[i+1]);
+                unsigned long long new_d = get_tardiness(seq).first;
+                
+                if (new_d < current_d) {
+                    current_d = new_d;
+                    improved = true;
+                } else {
+                    swap(seq[i], seq[i+1]);
+                }
+            }
+        }
+    }
+    pair<unsigned long long, vector<int>> solve_small(int time_limit_sec) {
+        auto start_time = chrono::steady_clock::now();
+        
+        // 1. Start: EDD (Earliest Due Date) - solidny fundament
+        vector<int> current_seq(n);
+        iota(current_seq.begin(), current_seq.end(), 0);
+        sort(current_seq.begin(), current_seq.end(), [&](int a, int b) {
+            return all_jobs[a].due_date < all_jobs[b].due_date;
+        });
+
+        unsigned long long current_d = get_tardiness(current_seq).first;
+        adjacent_local_search(current_seq, current_d); // pierwszy szlif
+
+        vector<int> best_seq = current_seq;
+        unsigned long long best_d = current_d;
+
+        // 2. Główna pętla Iterated Greedy
+        while (chrono::duration<double>(chrono::steady_clock::now() - start_time).count() < time_limit_sec) {
+            vector<int> temp_seq = current_seq;
+
+            // --- FAZA DESTRUKCJI ---
+            int d_size = 4; // Dla n=50-100 to optymalna wartość
+            vector<int> removed;
+            for (int i = 0; i < d_size; ++i) {
+                uniform_int_distribution<int> dist(0, (int)temp_seq.size() - 1);
+                int idx = dist(rng);
+                removed.push_back(temp_seq[idx]);
+                temp_seq.erase(temp_seq.begin() + idx);
+            }
+
+            // --- FAZA KONSTRUKCJI ---
+            for (int job : removed) {
+                insert_best(temp_seq, job);
+            }
+
+            // --- SZLIFOWANIE (Adjacent Local Search) ---
+            unsigned long long temp_d = get_tardiness(temp_seq).first;
+            adjacent_local_search(temp_seq, temp_d);
+
+            // --- AKCEPTACJA ---
+            if (temp_d <= current_d) { 
+                current_seq = temp_seq;
+                current_d = temp_d;
+                
+                if (current_d < best_d) {
+                    best_d = current_d;
+                    best_seq = current_seq;
+                }
+            }
+        }
+
+        return {best_d, best_seq};
     }
 
     vector<int> get_edd_sequence() {
@@ -85,7 +174,7 @@ private:
     }
 
     pair<unsigned long long, vector<int>> local_search(vector<int> seq, double time_limit_sec, chrono::steady_clock::time_point start_time) {
-        unsigned long long current_D = calculate_total_tardiness(seq).first;
+        unsigned long long current_D = get_tardiness(seq).first;
         bool improved = true;
 
         while (improved) {
@@ -98,7 +187,7 @@ private:
                     }
 
                     swap(seq[i], seq[j]);
-                    unsigned long long new_D = calculate_total_tardiness(seq).first;
+                    unsigned long long new_D = get_tardiness(seq).first;
 
                     if (new_D < current_D) {
                         current_D = new_D;
@@ -119,6 +208,9 @@ private:
         
         unsigned long long best_overall_D = -1; // max value
         vector<int> best_overall_seq;
+        if(all_jobs.size() <= 100) {
+            return solve_small(time_limit_sec);
+        }
 
         for (int i = 0; i < 100; i++) {
             double a = ((float)i) / 100;
@@ -126,7 +218,7 @@ private:
             if(i == 0) {
                 seq=get_edd_sequence();
             }
-            unsigned long long d = calculate_total_tardiness(seq).first;
+            unsigned long long d = get_tardiness(seq).first;
             if (best_overall_seq.empty() || d < best_overall_D) {
                 best_overall_D = d;
                 best_overall_seq = seq;
