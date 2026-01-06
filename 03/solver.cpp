@@ -24,161 +24,118 @@ private:
     vector<JobData> all_jobs;
     vector<vector<unsigned long long>> setup_times;
     const int MAX_ITERATIONS = 1000000;
-    pair<unsigned long long, vector<unsigned long long>> calculate_total_tardiness(
-        const vector<int> &sequence) {
-        int n = sequence.size();
-        vector<vector<unsigned long long>> C(NUM_MACHINES,
-                                             vector<unsigned long long>(n, 0));
+    pair<unsigned long long, vector<unsigned long long>> calculate_total_tardiness(const vector<int> &sequence) {
+        int seq_size = sequence.size();
+        vector<vector<unsigned long long>> C(NUM_MACHINES, vector<unsigned long long>(seq_size, 0));
         unsigned long long total_tardiness = 0;
-        vector<unsigned long long> completion_on_M5(n, 0);
 
-        for (int j = 0; j < n; ++j) {
-            int job_idx = sequence[j];
-            const auto &job = all_jobs[job_idx];
+        for (int j = 0; j < seq_size; ++j) {
+            int current_job_idx = sequence[j];
+            int prev_job_idx = (j == 0) ? -1 : sequence[j - 1];
 
             for (int m = 0; m < NUM_MACHINES; ++m) {
-                unsigned long long start_time;
-                if (m == 0) {
-                    unsigned long long prev_C_M1 = (j == 0) ? 0 : C[0][j - 1];
-                    int prev_job_idx = (j == 0) ? -1 : sequence[j - 1];
-                    unsigned long long setup_time =
-                        (j == 0) ? 0 : setup_times[prev_job_idx][job_idx];
-                    start_time = prev_C_M1 + setup_time;
-                } else {
-                    start_time = C[m - 1][j];
-                }
-
+                unsigned long long machine_ready = 0;
                 if (j > 0) {
-                    int prev_job_idx = sequence[j - 1];
-                    unsigned long long prev_C_Mm = C[m][j - 1];
-                    unsigned long long setup_time = setup_times[prev_job_idx][job_idx];
-                    start_time = max(start_time, prev_C_Mm + setup_time);
+                    machine_ready = C[m][j - 1] + setup_times[prev_job_idx][current_job_idx];
                 }
+                unsigned long long prev_stage_ready = (m == 0) ? 0 : C[m - 1][j];
 
-                C[m][j] = start_time + job.processing_times[m];
+                C[m][j] = max(machine_ready, prev_stage_ready) + all_jobs[current_job_idx].processing_times[m];
             }
-
+            
             unsigned long long finish_time = C[NUM_MACHINES - 1][j];
-            completion_on_M5[j] = finish_time;
-            unsigned long long tardiness =
-                (finish_time > job.due_date) ? (finish_time - job.due_date) : 0;
-            total_tardiness += tardiness;
+            unsigned long long due = all_jobs[current_job_idx].due_date;
+            if (finish_time > due) total_tardiness += (finish_time - due);
         }
-        return {total_tardiness, completion_on_M5};
+        return {total_tardiness, C[NUM_MACHINES - 1]};
     }
 
-    pair<unsigned long long, vector<int>> select_based_on_setup(double a) {
+    vector<int> get_edd_sequence() {
+        vector<int> seq(n);
+        iota(seq.begin(), seq.end(), 0);
+        sort(seq.begin(), seq.end(), [&](int a, int b) {
+            return all_jobs[a].due_date < all_jobs[b].due_date;
+        });
+        return seq;
+    }
+
+    vector<int> get_setup_weighted_sequence(double a) {
         vector<int> unscheduled(n);
         iota(unscheduled.begin(), unscheduled.end(), 0);
-
         vector<int> scheduled;
 
         while (!unscheduled.empty()) {
             int last = scheduled.empty() ? -1 : scheduled.back();
-            int best_job = -1;
+            int best_idx_in_unscheduled = 0;
             double best_val = 1e18;
 
-            for (int j : unscheduled) {
-                unsigned long long setup =
-                    (last == -1 ? 0 : setup_times[last][j]);
+            for (int i = 0; i < unscheduled.size(); ++i) {
+                int j = unscheduled[i];
+                unsigned long long setup = (last == -1 ? 0 : setup_times[last][j]);
                 double value = all_jobs[j].due_date + a * setup;
-
                 if (value < best_val) {
                     best_val = value;
-                    best_job = j;
+                    best_idx_in_unscheduled = i;
                 }
             }
-
-            scheduled.push_back(best_job);
-            unscheduled.erase(find(unscheduled.begin(),
-                                   unscheduled.end(), best_job));
+            scheduled.push_back(unscheduled[best_idx_in_unscheduled]);
+            unscheduled.erase(unscheduled.begin() + best_idx_in_unscheduled);
         }
-
-        unsigned long long D = calculate_total_tardiness(scheduled).first;
-        return make_pair(D, scheduled);
+        return scheduled;
     }
-    pair<unsigned long long, vector<int>> greed(vector<int> seq,
-                         unsigned long long best_D,
-                         double time_limit_sec) {
-        auto start = chrono::steady_clock::now();
-        unsigned long long current_D = best_D;
+
+    pair<unsigned long long, vector<int>> local_search(vector<int> seq, double time_limit_sec, chrono::steady_clock::time_point start_time) {
+        unsigned long long current_D = calculate_total_tardiness(seq).first;
         bool improved = true;
 
         while (improved) {
             improved = false;
-
-            for (int i = 0; i < n; ++i) {
+            for (int i = 0; i < n - 1; ++i) {
                 for (int j = i + 1; j < n; ++j) {
                     auto now = chrono::steady_clock::now();
-                    double elapsed =
-                        chrono::duration<double>(now - start).count();
-                    if (elapsed > time_limit_sec)
-                        return make_pair(current_D, seq);
+                    if (chrono::duration<double>(now - start_time).count() >= time_limit_sec) {
+                        return {current_D, seq};
+                    }
 
-                    vector<int> new_seq = seq;
-                    swap(new_seq[i], new_seq[j]);
+                    swap(seq[i], seq[j]);
+                    unsigned long long new_D = calculate_total_tardiness(seq).first;
 
-                    unsigned long long D = calculate_total_tardiness(new_seq).first;
-                    if (D < current_D) {
-                        seq = new_seq;
-                        current_D = D;
+                    if (new_D < current_D) {
+                        current_D = new_D;
                         improved = true;
-                        goto NEXT_ITER;
+                        goto next_iteration; 
+                    } else {
+                        swap(seq[i], seq[j]);
                     }
                 }
             }
-        NEXT_ITER:;
+            next_iteration:;
         }
-        return make_pair(current_D, seq);
-    };
+        return {current_D, seq};
+    }
 
     pair<unsigned long long, vector<int>> solve(int time_limit_sec) {
-
-        auto try_default_but_different_setup = [&]() {
-            vector<int> seq(n);
-            iota(seq.begin(), seq.end(), 0);
-            if (n >= 2) swap(seq[0], seq[1]);
-            return make_pair(seq, calculate_total_tardiness(seq).first);
-        };
         auto start_time = chrono::steady_clock::now();
+        
+        unsigned long long best_overall_D = -1; // max value
+        vector<int> best_overall_seq;
 
-        vector<double> steps;
-        for (int i = 0; i < 10; ++i)
-            steps.push_back(i / 10.0);
-
-        auto best = select_based_on_setup(steps[0]);
-        vector<int> best_jobs = best.second;
-        unsigned long long best_D = best.first;
-
-        for (size_t i = 1; i < steps.size(); ++i) {
-            auto res = select_based_on_setup(steps[i]);
-            if (res.first < best_D) {
-                best_D = res.first;
-                best_jobs = res.second;
+        for (int i = 0; i < 100; i++) {
+            double a = ((float)i) / 100;
+            auto seq = get_setup_weighted_sequence(a);
+            if(i == 0) {
+                seq=get_edd_sequence();
+            }
+            unsigned long long d = calculate_total_tardiness(seq).first;
+            if (best_overall_seq.empty() || d < best_overall_D) {
+                best_overall_D = d;
+                best_overall_seq = seq;
             }
         }
 
-        auto def = try_default_but_different_setup();
-        if (def.second < best_D) {
-            best_D = def.second;
-            best_jobs = def.first;
-        }
-
-        auto potential = select_based_on_setup(0.1);
-        if (potential.first < best_D) {
-            best_D = potential.first;
-            best_jobs = potential.second;
-        }
-
-        auto greedy =
-            greed(best_jobs, best_D, 0.9 * time_limit_sec);
-
-        if (greedy.first < best_D) {
-            best_D = greedy.first;
-            best_jobs = greedy.second;
-        }
-
-        return { best_D, best_jobs };
+        auto result = local_search(best_overall_seq, (double)time_limit_sec * 0.95, start_time);
+        
+        return result;
     }
 
 public:
