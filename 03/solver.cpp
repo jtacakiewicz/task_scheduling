@@ -87,6 +87,7 @@ private:
     }
     pair<unsigned long long, vector<int>> solve_small(int time_limit_sec, vector<int> current_seq) {
         auto start_time = chrono::steady_clock::now();
+        double time_limit = (double)time_limit_sec;
 
         unsigned long long current_d = get_tardiness(current_seq).first;
         adjacent_local_search(current_seq, current_d);
@@ -94,38 +95,56 @@ private:
         vector<int> best_seq = current_seq;
         unsigned long long best_d = current_d;
 
-        double temperature = 0.5;
+        // --- INICJALIZACJA TEMPERATURY ---
+        // Dobra praktyka: T0 to ok. 20-50% średniego kosztu (opóźnienia) 
+        // Możesz też ustawić stałą wartość, np. 100.0, i dostosować ją testowo.
+        double T0 = 10.0; 
+        double temperature = T0;
 
-        while (chrono::duration<double>(chrono::steady_clock::now() - start_time).count() < time_limit_sec) {
+        while (true) {
+            auto now = chrono::steady_clock::now();
+            double elapsed = chrono::duration<double>(now - start_time).count();
+            if (elapsed >= time_limit) break;
+
+            temperature = T0 * 1.0 - (elapsed / time_limit);
+            if (temperature < 0.01) temperature = 0.01;
+
             vector<int> temp_seq = current_seq;
-            int d_size = 3 + (rng() % 3); 
+
+            int d_size = 3 + (rng() % 3);
             vector<int> removed;
             for (int i = 0; i < d_size; ++i) {
-                int idx = uniform_int_distribution<int>(0, temp_seq.size() - 1)(rng);
+                if (temp_seq.empty()) break;
+                int idx = uniform_int_distribution<int>(0, (int)temp_seq.size() - 1)(rng);
                 removed.push_back(temp_seq[idx]);
                 temp_seq.erase(temp_seq.begin() + idx);
             }
+
             for (int job : removed) {
                 insert_best(temp_seq, job);
             }
 
             unsigned long long temp_d = get_tardiness(temp_seq).first;
-            if (rng() % 10 == 0) adjacent_local_search(temp_seq, temp_d);
+
             if (temp_d < current_d) {
                 current_seq = temp_seq;
                 current_d = temp_d;
                 if (current_d < best_d) {
                     best_d = current_d;
                     best_seq = current_seq;
+                    adjacent_local_search(best_seq, best_d);
                 }
             } else {
-                double prob = exp((double)(current_d - temp_d) / temperature);
+                double delta = (double)(temp_d - current_d);
+                double prob = exp(-delta / temperature);
+
                 if (uniform_real_distribution<double>(0, 1)(rng) < prob) {
                     current_seq = temp_seq;
                     current_d = temp_d;
                 }
             }
         }
+
         return {best_d, best_seq};
     }
 
