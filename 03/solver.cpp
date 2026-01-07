@@ -85,57 +85,47 @@ private:
             }
         }
     }
-    pair<unsigned long long, vector<int>> solve_small(int time_limit_sec) {
+    pair<unsigned long long, vector<int>> solve_small(int time_limit_sec, vector<int> current_seq) {
         auto start_time = chrono::steady_clock::now();
-        
-        // 1. Start: EDD (Earliest Due Date) - solidny fundament
-        vector<int> current_seq(n);
-        iota(current_seq.begin(), current_seq.end(), 0);
-        sort(current_seq.begin(), current_seq.end(), [&](int a, int b) {
-            return all_jobs[a].due_date < all_jobs[b].due_date;
-        });
 
         unsigned long long current_d = get_tardiness(current_seq).first;
-        adjacent_local_search(current_seq, current_d); // pierwszy szlif
+        adjacent_local_search(current_seq, current_d);
 
         vector<int> best_seq = current_seq;
         unsigned long long best_d = current_d;
 
-        // 2. Główna pętla Iterated Greedy
+        double temperature = 0.5;
+
         while (chrono::duration<double>(chrono::steady_clock::now() - start_time).count() < time_limit_sec) {
             vector<int> temp_seq = current_seq;
-
-            // --- FAZA DESTRUKCJI ---
-            int d_size = 4; // Dla n=50-100 to optymalna wartość
+            int d_size = 3 + (rng() % 3); 
             vector<int> removed;
             for (int i = 0; i < d_size; ++i) {
-                uniform_int_distribution<int> dist(0, (int)temp_seq.size() - 1);
-                int idx = dist(rng);
+                int idx = uniform_int_distribution<int>(0, temp_seq.size() - 1)(rng);
                 removed.push_back(temp_seq[idx]);
                 temp_seq.erase(temp_seq.begin() + idx);
             }
-
-            // --- FAZA KONSTRUKCJI ---
             for (int job : removed) {
                 insert_best(temp_seq, job);
             }
 
-            // --- SZLIFOWANIE (Adjacent Local Search) ---
             unsigned long long temp_d = get_tardiness(temp_seq).first;
-            adjacent_local_search(temp_seq, temp_d);
-
-            // --- AKCEPTACJA ---
-            if (temp_d <= current_d) { 
+            if (rng() % 10 == 0) adjacent_local_search(temp_seq, temp_d);
+            if (temp_d < current_d) {
                 current_seq = temp_seq;
                 current_d = temp_d;
-                
                 if (current_d < best_d) {
                     best_d = current_d;
                     best_seq = current_seq;
                 }
+            } else {
+                double prob = exp((double)(current_d - temp_d) / temperature);
+                if (uniform_real_distribution<double>(0, 1)(rng) < prob) {
+                    current_seq = temp_seq;
+                    current_d = temp_d;
+                }
             }
         }
-
         return {best_d, best_seq};
     }
 
@@ -208,9 +198,6 @@ private:
         
         unsigned long long best_overall_D = -1; // max value
         vector<int> best_overall_seq;
-        if(all_jobs.size() <= 100) {
-            return solve_small(time_limit_sec);
-        }
 
         for (int i = 0; i < 100; i++) {
             double a = ((float)i) / 100;
@@ -224,10 +211,7 @@ private:
                 best_overall_seq = seq;
             }
         }
-
-        auto result = local_search(best_overall_seq, (double)time_limit_sec * 0.95, start_time);
-        
-        return result;
+        return solve_small(time_limit_sec, best_overall_seq);
     }
 
 public:
