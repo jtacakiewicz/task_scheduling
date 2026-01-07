@@ -129,6 +129,46 @@ private:
         return {best_d, best_seq};
     }
 
+    vector<int> get_neh_sequence() {
+        vector<pair<unsigned long long, int>> total_processing;
+        for (int j = 0; j < n; ++j) {
+            unsigned long long sum_p = 0;
+            for (int m = 0; m < NUM_MACHINES; ++m) {
+                sum_p += all_jobs[j].processing_times[m];
+            }
+            total_processing.push_back({sum_p, j});
+        }
+
+        // Sortujemy malejąco po sumarycznym czasie przetwarzania
+        sort(total_processing.rbegin(), total_processing.rend());
+
+        vector<int> seq;
+        // 2. Iteracyjne wstawianie zadań (procedura NEH)
+        for (int i = 0; i < n; ++i) {
+            int job_to_insert = total_processing[i].second;
+
+            int best_pos = 0;
+            unsigned long long min_tardiness = -1; // Max value
+
+            // Szukamy najlepszej pozycji w aktualnej sekwencji
+            for (int pos = 0; pos <= (int)seq.size(); ++pos) {
+                seq.insert(seq.begin() + pos, job_to_insert);
+                unsigned long long current_tardiness = get_tardiness(seq).first;
+
+                if (current_tardiness < min_tardiness) {
+                    min_tardiness = current_tardiness;
+                    best_pos = pos;
+                }
+                seq.erase(seq.begin() + pos);
+            }
+
+            // Wstawiamy zadanie na stałe w najlepsze miejsce
+            seq.insert(seq.begin() + best_pos, job_to_insert);
+        }
+
+        return seq;
+    }
+
     vector<int> get_edd_sequence() {
         vector<int> seq(n);
         iota(seq.begin(), seq.end(), 0);
@@ -199,11 +239,15 @@ private:
         unsigned long long best_overall_D = -1; // max value
         vector<int> best_overall_seq;
 
-        for (int i = 0; i < 100; i++) {
+        for (int i = 0; i <= 101; i++) {
             double a = ((float)i) / 100;
-            auto seq = get_setup_weighted_sequence(a);
-            if(i == 0) {
-                seq=get_edd_sequence();
+            vector<int> seq;
+            if(i == 100) {
+                seq = get_edd_sequence();
+            }else if(i == 101) {
+                seq = get_neh_sequence();
+            }else {
+                seq = get_setup_weighted_sequence(a);
             }
             unsigned long long d = get_tardiness(seq).first;
             if (best_overall_seq.empty() || d < best_overall_D) {
