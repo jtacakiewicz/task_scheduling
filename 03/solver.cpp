@@ -106,7 +106,7 @@ private:
             double elapsed = chrono::duration<double>(now - start_time).count();
             if (elapsed >= time_limit) break;
 
-            temperature = T0 * 1.0 - (elapsed / time_limit);
+            temperature = T0 * (1.0 - (elapsed / time_limit));
             if (temperature < 0.01) temperature = 0.01;
 
             vector<int> temp_seq = current_seq;
@@ -146,6 +146,93 @@ private:
         }
 
         return {best_d, best_seq};
+    }
+    struct Ant {
+        vector<int> sequence;
+        unsigned long long tardiness;
+    };
+
+    pair<unsigned long long, vector<int>> solve_with_ants(double time_limit, vector<int> start_seq) {
+        auto start_time = chrono::steady_clock::now();
+
+        vector<int> best_overall_seq = start_seq;
+        unsigned long long best_overall_d = get_tardiness(start_seq).first;
+
+        // 2. INICJALIZACJA MRÓWEK
+        int num_ants = 10;
+        double alpha = 1.0; // waga feromonu
+        double beta = 2.0;  // waga heurystyki (terminów)
+        double evaporation = 0.1;
+
+        // Macierz feromonów: pheromones[i][j] - atrakcyjność umieszczenia zadania j na pozycji i
+        vector<vector<double>> pheromones(n, vector<double>(n, 1.0));
+
+        // Wzmocnienie feromonów na bazie wyniku z IG (Elitarna ścieżka)
+        for (int i = 0; i < n; ++i) {
+            pheromones[i][best_overall_seq[i]] += 10.0; 
+        }
+
+        while (chrono::duration<double>(chrono::steady_clock::now() - start_time).count() < time_limit) {
+            vector<Ant> ants(num_ants);
+
+            for (int a = 0; a < num_ants; ++a) {
+                vector<bool> visited(n, false);
+                ants[a].sequence.clear();
+
+                for (int pos = 0; pos < n; ++pos) {
+                    vector<double> probabilities;
+                    vector<int> candidates;
+                    double sum_prob = 0.0;
+
+                    for (int job = 0; job < n; ++job) {
+                        if (!visited[job]) {
+                            // Heurystyka: im wcześniejszy termin (due_date), tym wyższa atrakcyjność
+                            // Dodajemy małe '1', by uniknąć dzielenia przez 0
+                            double visibility = 1.0 / (all_jobs[job].due_date + 1.0);
+                            double p = pow(pheromones[pos][job], alpha) * pow(visibility, beta);
+
+                            probabilities.push_back(p);
+                            candidates.push_back(job);
+                            sum_prob += p;
+                        }
+                    }
+                    double r = uniform_real_distribution<double>(0, sum_prob)(rng);
+                    double current_sum = 0;
+                    for (int i = 0; i < probabilities.size(); ++i) {
+                        current_sum += probabilities[i];
+                        if (current_sum >= r) {
+                            int chosen_job = candidates[i];
+                            ants[a].sequence.push_back(chosen_job);
+                            visited[chosen_job] = true;
+                            break;
+                        }
+                    }
+                }
+                ants[a].tardiness = get_tardiness(ants[a].sequence).first;
+
+                if (ants[a].tardiness < best_overall_d) {
+                    adjacent_local_search(ants[a].sequence, ants[a].tardiness);
+                }
+            }
+
+            for (int i = 0; i < n; ++i)
+                for (int j = 0; j < n; ++j)
+                    pheromones[i][j] *= (1.0 - evaporation);
+
+            for (auto& ant : ants) {
+                if (ant.tardiness < best_overall_d) {
+                    best_overall_d = ant.tardiness;
+                    best_overall_seq = ant.sequence;
+                }
+
+                double deposit = 1.0 / (1.0 + (double)ant.tardiness);
+                for (int i = 0; i < n; ++i) {
+                    pheromones[i][ant.sequence[i]] += deposit;
+                }
+            }
+        }
+
+        return {best_overall_d, best_overall_seq};
     }
 
     vector<int> get_neh_sequence() {
@@ -274,7 +361,11 @@ private:
                 best_overall_seq = seq;
             }
         }
-        return solve_small(time_limit_sec, best_overall_seq);
+        auto now = chrono::steady_clock::now();
+        double elapsed = chrono::duration<double>(now - start_time).count();
+        double time_left = (static_cast<double>(time_limit_sec) - elapsed);
+        auto result = solve_small(time_left * 0.5, best_overall_seq);
+        return solve_with_ants(time_left * 0.5, result.second);
     }
 
 public:
