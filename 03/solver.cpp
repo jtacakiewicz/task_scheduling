@@ -112,7 +112,7 @@ private:
         // --- INICJALIZACJA TEMPERATURY ---
         // Dobra praktyka: T0 to ok. 20-50% średniego kosztu (opóźnienia) 
         // Możesz też ustawić stałą wartość, np. 100.0, i dostosować ją testowo.
-        double T0 = 10.0; 
+        double T0 = max(1.0, 0.3 * current_d / current_seq.size()); 
         double temperature = T0;
 
         while (true) {
