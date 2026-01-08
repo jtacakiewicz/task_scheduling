@@ -99,7 +99,33 @@ private:
             }
         }
     }
-    pair<unsigned long long, vector<int>> solve_anneal(int time_limit_sec, vector<int> current_seq) {
+    int index_of_max_tardiness_job(const vector<int>& seq) {
+        auto result = get_tardiness(seq);
+        const vector<unsigned long long>& C = result.second;
+
+        unsigned long long max_D = 0;
+        int worst_idx = 0;
+
+        for (int i = 0; i < (int)seq.size(); ++i) {
+            int job = seq[i];
+            unsigned long long due = all_jobs[job].due_date;
+
+            if (C[i] > due) {
+                unsigned long long Dj = C[i] - due;
+                if (Dj > max_D) {
+                    max_D = Dj;
+                    worst_idx = i;
+                }
+            }
+        }
+
+        return worst_idx;
+    }
+
+    pair<unsigned long long, vector<int>> solve_anneal(
+        int time_limit_sec,
+        vector<int> current_seq
+    ) {
         auto start_time = chrono::steady_clock::now();
         double time_limit = (double)time_limit_sec;
 
@@ -109,27 +135,42 @@ private:
         vector<int> best_seq = current_seq;
         unsigned long long best_d = current_d;
 
-        // --- INICJALIZACJA TEMPERATURY ---
-        // Dobra praktyka: T0 to ok. 20-50% średniego kosztu (opóźnienia) 
-        // Możesz też ustawić stałą wartość, np. 100.0, i dostosować ją testowo.
-        double T0 = max(1.0, 0.3 * current_d / current_seq.size()); 
+        // --- TEMPERATURA ---
+        double T0 = max(1.0, 0.3 * current_d / current_seq.size());
         double temperature = T0;
 
+        // --- STAGNACJA ---
+        int no_improve = 0;
+        const int MAX_NO_IMPROVE = 2000;
+
         while (true) {
-            auto now = chrono::steady_clock::now();
-            double elapsed = chrono::duration<double>(now - start_time).count();
+            double elapsed =
+                chrono::duration<double>(
+                    chrono::steady_clock::now() - start_time).count();
             if (elapsed >= time_limit) break;
 
-            temperature = T0 * (1.0 - (elapsed / time_limit));
+            temperature = T0 * (1.0 - elapsed / time_limit);
             if (temperature < 0.01) temperature = 0.01;
 
             vector<int> temp_seq = current_seq;
 
-            int d_size = 3 + (rng() % 3);
+            // --- ADAPTACYJNY ROZMIAR LNS ---
+            int n = temp_seq.size();
+            int base = max(2, n / 40);
+            int d_size = base + (rng() % 3);
+
             vector<int> removed;
             for (int i = 0; i < d_size; ++i) {
                 if (temp_seq.empty()) break;
-                int idx = uniform_int_distribution<int>(0, (int)temp_seq.size() - 1)(rng);
+
+                int idx;
+                if (uniform_real_distribution<double>(0.0, 1.0)(rng) < 0.2) {
+                    idx = index_of_max_tardiness_job(temp_seq);
+                } else {
+                    idx = uniform_int_distribution<int>(
+                        0, (int)temp_seq.size() - 1)(rng);
+                }
+
                 removed.push_back(temp_seq[idx]);
                 temp_seq.erase(temp_seq.begin() + idx);
             }
@@ -143,19 +184,37 @@ private:
             if (temp_d < current_d) {
                 current_seq = temp_seq;
                 current_d = temp_d;
+                no_improve = 0;
+
                 if (current_d < best_d) {
                     best_d = current_d;
                     best_seq = current_seq;
                     adjacent_local_search(best_seq, best_d);
                 }
             } else {
+                no_improve++;
+
                 double delta = (double)(temp_d - current_d);
                 double prob = exp(-delta / temperature);
 
-                if (uniform_real_distribution<double>(0, 1)(rng) < prob) {
+                if (uniform_real_distribution<double>(0.0, 1.0)(rng) < prob) {
                     current_seq = temp_seq;
                     current_d = temp_d;
                 }
+            }
+
+            if (no_improve > MAX_NO_IMPROVE) {
+                int a = rng() % current_seq.size();
+                int b = rng() % current_seq.size();
+                if (a > b) swap(a, b);
+
+                shuffle(current_seq.begin() + a,
+                        current_seq.begin() + b,
+                        rng);
+
+                current_d = get_tardiness(current_seq).first;
+                temperature = T0;
+                no_improve = 0;
             }
         }
 
@@ -346,36 +405,6 @@ private:
             unscheduled.erase(unscheduled.begin() + best_idx_in_unscheduled);
         }
         return scheduled;
-    }
-
-    pair<unsigned long long, vector<int>> local_search(vector<int> seq, double time_limit_sec, chrono::steady_clock::time_point start_time) {
-        unsigned long long current_D = get_tardiness(seq).first;
-        bool improved = true;
-
-        while (improved) {
-            improved = false;
-            for (int i = 0; i < n - 1; ++i) {
-                for (int j = i + 1; j < n; ++j) {
-                    auto now = chrono::steady_clock::now();
-                    if (chrono::duration<double>(now - start_time).count() >= time_limit_sec) {
-                        return {current_D, seq};
-                    }
-
-                    swap(seq[i], seq[j]);
-                    unsigned long long new_D = get_tardiness(seq).first;
-
-                    if (new_D < current_D) {
-                        current_D = new_D;
-                        improved = true;
-                        goto next_iteration; 
-                    } else {
-                        swap(seq[i], seq[j]);
-                    }
-                }
-            }
-            next_iteration:;
-        }
-        return {current_D, seq};
     }
 
     void local_distance_swap(vector<int>& seq, unsigned long long& best_d) {
