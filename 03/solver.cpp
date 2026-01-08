@@ -373,33 +373,59 @@ private:
         return {current_D, seq};
     }
 
+    void local_distance_swap(vector<int>& seq, unsigned long long& best_d) {
+        bool improved = true;
+        int n = seq.size();
+
+        while (improved) {
+            improved = false;
+
+            for (int i = 0; i < n; ++i) {
+                for (int j = i+1; j < n; ++j) {
+                    swap(seq[i], seq[j]);
+                    unsigned long long d = get_tardiness(seq).first;
+
+                    if (d < best_d) {
+                        best_d = d;
+                        improved = true;
+                    } else {
+                        swap(seq[i], seq[j]);
+                    }
+                }
+            }
+        }
+    }
     pair<unsigned long long, vector<int>> solve(int time_limit_sec) {
         auto start_time = chrono::steady_clock::now();
         
-        unsigned long long best_overall_D = -1; // max value
-        vector<int> best_overall_seq;
+        unsigned long long best_D = numeric_limits<unsigned long long>::max();
+        vector<int> best_seq;
 
-        for (int i = 0; i <= 101; i++) {
-            double a = ((float)i) / 100;
-            vector<int> seq;
-            if(i == 100) {
-                seq = get_edd_sequence();
-            }else if(i == 101) {
-                seq = get_neh_sequence();
-            }else {
-                seq = get_setup_weighted_sequence(a);
-            }
+        vector<vector<int>> initial_solutions;
+
+        initial_solutions.push_back(get_edd_sequence());
+        initial_solutions.push_back(get_neh_sequence());
+
+        for (int i = 0; i <= 100; ++i) {
+            double alpha = static_cast<double>(i) / 100.0;
+            initial_solutions.push_back(get_setup_weighted_sequence(alpha));
+        }
+
+        for (const auto& seq : initial_solutions) {
             unsigned long long d = get_tardiness(seq).first;
-            if (best_overall_seq.empty() || d < best_overall_D) {
-                best_overall_D = d;
-                best_overall_seq = seq;
+            if (d < best_D) {
+                best_D = d;
+                best_seq = seq;
             }
         }
         auto now = chrono::steady_clock::now();
         double elapsed = chrono::duration<double>(now - start_time).count();
         double time_left = (static_cast<double>(time_limit_sec) - elapsed);
-        auto result = solve_small(time_left * 0.5, best_overall_seq);
-        return solve_with_ants(time_left * 0.5, result.second);
+        auto greedy = solve_small(time_left * 0.01, best_seq);
+        greedy = solve_small(time_left * 0.35, greedy.second);
+        auto genetic = solve_small(time_left * 0.6, greedy.second);
+        local_distance_swap(genetic.second, genetic.first);
+        return genetic;
     }
 
 public:
