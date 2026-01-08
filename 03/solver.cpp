@@ -5,6 +5,7 @@
 #include <iostream>
 #include <numeric>
 #include <random>
+#include <set>
 #include <sstream>
 #include <vector>
 
@@ -18,7 +19,6 @@ struct JobData {
     unsigned long long due_date;
 };
 
-
 class FlowShopSolver {
 private:
     int n;
@@ -27,30 +27,44 @@ private:
     const int MAX_ITERATIONS = 1000000;
     mt19937 rng{2137};
 
+    unsigned long long machine_finish_times[NUM_MACHINES];
+
     pair<unsigned long long, vector<unsigned long long>> get_tardiness(const vector<int> &sequence) {
         int seq_size = sequence.size();
-        vector<vector<unsigned long long>> C(NUM_MACHINES, vector<unsigned long long>(seq_size, 0));
+        vector<unsigned long long> last_machine_C(seq_size);
         unsigned long long total_tardiness = 0;
+
+        for (int m = 0; m < NUM_MACHINES; ++m) machine_finish_times[m] = 0;
+
+        int prev_job_idx = -1;
 
         for (int j = 0; j < seq_size; ++j) {
             int current_job_idx = sequence[j];
-            int prev_job_idx = (j == 0) ? -1 : sequence[j - 1];
 
-            for (int m = 0; m < NUM_MACHINES; ++m) {
-                unsigned long long machine_ready = 0;
-                if (j > 0) {
-                    machine_ready = C[m][j - 1] + setup_times[prev_job_idx][current_job_idx];
-                }
-                unsigned long long prev_stage_ready = (m == 0) ? 0 : C[m - 1][j];
+            unsigned long long setup = (prev_job_idx == -1) ? 0 : setup_times[prev_job_idx][current_job_idx];
+            machine_finish_times[0] = machine_finish_times[0] + setup + all_jobs[current_job_idx].processing_times[0];
 
-                C[m][j] = max(machine_ready, prev_stage_ready) + all_jobs[current_job_idx].processing_times[m];
+            for (int m = 1; m < NUM_MACHINES; ++m) {
+                unsigned long long ready_from_prev_job = machine_finish_times[m] + setup;
+                unsigned long long ready_from_prev_stage = machine_finish_times[m-1];
+
+                machine_finish_times[m] = (ready_from_prev_job > ready_from_prev_stage ? 
+                    ready_from_prev_job : ready_from_prev_stage) 
+                    + all_jobs[current_job_idx].processing_times[m];
             }
-            
-            unsigned long long finish_time = C[NUM_MACHINES - 1][j];
+
+            unsigned long long finish_time = machine_finish_times[NUM_MACHINES - 1];
+            last_machine_C[j] = finish_time;
+
             unsigned long long due = all_jobs[current_job_idx].due_date;
-            if (finish_time > due) total_tardiness += (finish_time - due);
+            if (finish_time > due) {
+                total_tardiness += (finish_time - due);
+            }
+
+            prev_job_idx = current_job_idx;
         }
-        return {total_tardiness, C[NUM_MACHINES - 1]};
+
+        return {total_tardiness, last_machine_C};
     }
 
     void insert_best(vector<int>& seq, int job) {
