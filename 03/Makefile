@@ -14,7 +14,7 @@ CXX = g++
 # -std=c++11: Użycie standardu C++11 (lub nowszego, np. c++17)
 # -Wall: Włączenie wszystkich standardowych ostrzeżeń
 # -O2: Poziom optymalizacji
-CXXFLAGS = -std=c++17 -Wall -O2
+CXXFLAGS = -std=c++17 -Wall -O3 -fopenmp
 
 # Cel domyślny: kompilacja programu
 all: $(SOLVER_EXECUTABLE) $(EXECUTABLE)

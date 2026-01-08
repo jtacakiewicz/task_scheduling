@@ -8,6 +8,7 @@
 #include <set>
 #include <sstream>
 #include <vector>
+#include <omp.h>
 
 using namespace std;
 
@@ -25,7 +26,7 @@ private:
     vector<JobData> all_jobs;
     vector<vector<unsigned long long>> setup_times;
     const int MAX_ITERATIONS = 1000000;
-    mt19937 rng{2137};
+    mt19937 global_rng{2137};
 
     unsigned long long machine_finish_times[NUM_MACHINES];
 
@@ -34,36 +35,28 @@ private:
         vector<unsigned long long> last_machine_C(seq_size);
         unsigned long long total_tardiness = 0;
 
-        for (int m = 0; m < NUM_MACHINES; ++m) machine_finish_times[m] = 0;
+        unsigned long long local_finish_times[NUM_MACHINES] = {0};
 
         int prev_job_idx = -1;
-
         for (int j = 0; j < seq_size; ++j) {
             int current_job_idx = sequence[j];
-
             unsigned long long setup = (prev_job_idx == -1) ? 0 : setup_times[prev_job_idx][current_job_idx];
-            machine_finish_times[0] = machine_finish_times[0] + setup + all_jobs[current_job_idx].processing_times[0];
+
+            local_finish_times[0] += setup + all_jobs[current_job_idx].processing_times[0];
 
             for (int m = 1; m < NUM_MACHINES; ++m) {
-                unsigned long long ready_from_prev_job = machine_finish_times[m] + setup;
-                unsigned long long ready_from_prev_stage = machine_finish_times[m-1];
-
-                machine_finish_times[m] = (ready_from_prev_job > ready_from_prev_stage ? 
-                    ready_from_prev_job : ready_from_prev_stage) 
+                unsigned long long ready_from_prev_job = local_finish_times[m] + setup;
+                unsigned long long ready_from_prev_stage = local_finish_times[m-1];
+                local_finish_times[m] = max(ready_from_prev_job, ready_from_prev_stage) 
                     + all_jobs[current_job_idx].processing_times[m];
             }
 
-            unsigned long long finish_time = machine_finish_times[NUM_MACHINES - 1];
+            unsigned long long finish_time = local_finish_times[NUM_MACHINES - 1];
             last_machine_C[j] = finish_time;
-
             unsigned long long due = all_jobs[current_job_idx].due_date;
-            if (finish_time > due) {
-                total_tardiness += (finish_time - due);
-            }
-
+            if (finish_time > due) total_tardiness += (finish_time - due);
             prev_job_idx = current_job_idx;
         }
-
         return {total_tardiness, last_machine_C};
     }
 
@@ -124,7 +117,8 @@ private:
 
     pair<unsigned long long, vector<int>> solve_anneal(
         int time_limit_sec,
-        vector<int> current_seq
+        vector<int> current_seq,
+        mt19937& rng
     ) {
         auto start_time = chrono::steady_clock::now();
         double time_limit = (double)time_limit_sec;
@@ -233,7 +227,7 @@ private:
     double adj_search_rate = 0.05;
 
     // Operator OX (Order Crossover) - zachowuje relacje kolejności
-    vector<int> crossover_ox(const vector<int>& p1, const vector<int>& p2) {
+    vector<int> crossover_ox(const vector<int>& p1, const vector<int>& p2, mt19937& rng) {
         int n = p1.size();
         vector<int> child(n, -1);
 
@@ -268,7 +262,7 @@ private:
     }
     pair<unsigned long long, vector<int>> run_genetic(
         double time_limit,
-        const vector<vector<int>>& initial_population
+        const vector<vector<int>>& initial_population,  mt19937& rng
     ) {
         auto start_time = chrono::steady_clock::now();
 
@@ -280,7 +274,7 @@ private:
         }
         while ((int)population.size() < pop_size) {
             vector<int> seq = population[rng() % population.size()].sequence;
-            mutate(seq); 
+            mutate(seq, rng); 
             population.push_back({seq, get_tardiness(seq).first});
         }
 
@@ -306,10 +300,10 @@ private:
                 vector<int> p1 = tournament();
                 vector<int> p2 = tournament();
 
-                vector<int> child_seq = crossover_ox(p1, p2);
+                vector<int> child_seq = crossover_ox(p1, p2, rng);
 
                 if (uniform_real_distribution<double>(0, 1)(rng) < mutation_rate) {
-                    mutate(child_seq);
+                    mutate(child_seq, rng);
                 }
 
                 auto tardiness = get_tardiness(child_seq).first;
@@ -326,7 +320,7 @@ private:
         return {population[0].tardiness, population[0].sequence};
     }
 
-    void mutate(vector<int>& seq) {
+    void mutate(vector<int>& seq, mt19937& rng) {
         // Swap mutation: zamień dwa losowe zadania
         int i = rng() % seq.size();
         int j = rng() % seq.size();
@@ -440,11 +434,17 @@ private:
         initial_solutions.push_back(make_pair(get_tardiness(tmp).first, tmp));
         vector<unsigned long long> initial_tardiness;
 
-        for (int i = 0; i <= 100; ++i) {
+        int num_variants = 101;
+        vector<pair<unsigned long long, vector<int>>> weighted_results(num_variants);
+
+        #pragma omp parallel for
+        for (int i = 0; i < num_variants; ++i) {
             double alpha = static_cast<double>(i) / 100.0;
             auto seq = get_setup_weighted_sequence(alpha);
-            initial_solutions.push_back(make_pair(get_tardiness(seq).first, seq));
+            weighted_results[i] = {get_tardiness(seq).first, seq};
         }
+        initial_solutions.insert(initial_solutions.end(), weighted_results.begin(), weighted_results.end());
+
         sort(initial_solutions.begin(), initial_solutions.end(),
              [](const auto& a, const auto& b) {
                  return a.first < b.first;
@@ -459,11 +459,25 @@ private:
         double elapsed = chrono::duration<double>(now - start_time).count();
         double time_left = (static_cast<double>(time_limit_sec) - elapsed);
 
-        auto gen = run_genetic(time_left * 0.2, population);
-        auto greedy = solve_anneal(time_left * 0.01, gen.second);
-        greedy = solve_anneal(time_left * 0.75, greedy.second);
-        local_distance_swap(greedy.second, greedy.first);
-        return greedy;
+        const int NUM_THREADS = omp_get_max_threads();
+        vector<pair<unsigned long long, vector<int>>> final_candidates(NUM_THREADS);
+
+        #pragma omp parallel
+        {
+            int tid = omp_get_thread_num();
+            mt19937 local_rng(2137 + tid); 
+
+            auto gen = run_genetic(time_left * 0.2, population, local_rng); 
+            auto anneal = solve_anneal(time_left * 0.01, gen.second, local_rng);
+            anneal = solve_anneal(time_left * 0.75, anneal.second, local_rng);
+
+            local_distance_swap(anneal.second, anneal.first);
+            final_candidates[tid] = anneal;
+        }
+
+        auto best_overall = *min_element(final_candidates.begin(), final_candidates.end());
+
+        return best_overall;
     }
 
 public:
