@@ -161,92 +161,112 @@ private:
 
         return {best_d, best_seq};
     }
-    struct Ant {
+    struct Individual {
         vector<int> sequence;
         unsigned long long tardiness;
+
+        bool operator<(const Individual& other) const {
+            return tardiness < other.tardiness;
+        }
     };
+    int pop_size = 40;
+    double mutation_rate = 0.15;
+    double adj_search_rate = 0.05;
 
-    pair<unsigned long long, vector<int>> solve_with_ants(double time_limit, vector<int> start_seq) {
-        auto start_time = chrono::steady_clock::now();
+    // Operator OX (Order Crossover) - zachowuje relacje kolejności
+    vector<int> crossover_ox(const vector<int>& p1, const vector<int>& p2) {
+        int n = p1.size();
+        vector<int> child(n, -1);
 
-        vector<int> best_overall_seq = start_seq;
-        unsigned long long best_overall_d = get_tardiness(start_seq).first;
+        // Wybieramy losowy przedział z pierwszego rodzica
+        int start = rng() % n;
+        int end = rng() % n;
+        if (start > end) swap(start, end);
 
-        // 2. INICJALIZACJA MRÓWEK
-        int num_ants = 10;
-        double alpha = 1.0; // waga feromonu
-        double beta = 2.0;  // waga heurystyki (terminów)
-        double evaporation = 0.1;
+        for (int i = start; i <= end; ++i) {
+            child[i] = p1[i];
+        }
 
-        // Macierz feromonów: pheromones[i][j] - atrakcyjność umieszczenia zadania j na pozycji i
-        vector<vector<double>> pheromones(n, vector<double>(n, 1.0));
-
-        // Wzmocnienie feromonów na bazie wyniku z IG (Elitarna ścieżka)
+        // Wypełniamy resztę genami z p2 w kolejności, w jakiej w nim występują
+        int p2_idx = 0;
         for (int i = 0; i < n; ++i) {
-            pheromones[i][best_overall_seq[i]] += 10.0; 
+            if (i >= start && i <= end) continue;
+
+            while (true) {
+                int gene = p2[p2_idx++];
+                // Sprawdź czy gen już jest w dziecku
+                bool exists = false;
+                for (int j = start; j <= end; ++j) {
+                    if (child[j] == gene) { exists = true; break; }
+                }
+                if (!exists) {
+                    child[i] = gene;
+                    break;
+                }
+            }
+        }
+        return child;
+    }
+    pair<unsigned long long, vector<int>> solve_genetic(double time_limit, vector<int> start_seq) {
+        auto start_time = chrono::steady_clock::now();
+        vector<Individual> population;
+
+        // 1. Inicjalizacja populacji (start_seq + losowe mutacje + całkowicie losowe)
+        population.push_back({start_seq, get_tardiness(start_seq).first});
+        while (population.size() < pop_size) {
+            vector<int> seq = start_seq;
+            if (rng() % 2 == 0) mutate(seq);
+            else shuffle(seq.begin(), seq.end(), rng);
+            population.push_back({seq, get_tardiness(seq).first});
         }
 
         while (chrono::duration<double>(chrono::steady_clock::now() - start_time).count() < time_limit) {
-            vector<Ant> ants(num_ants);
+            sort(population.begin(), population.end());
 
-            for (int a = 0; a < num_ants; ++a) {
-                vector<bool> visited(n, false);
-                ants[a].sequence.clear();
+            vector<Individual> next_gen;
+            // Elitaryzm (zachowaj 2 najlepszych)
+            next_gen.push_back(population[0]);
+            next_gen.push_back(population[1]);
 
-                for (int pos = 0; pos < n; ++pos) {
-                    vector<double> probabilities;
-                    vector<int> candidates;
-                    double sum_prob = 0.0;
-
-                    for (int job = 0; job < n; ++job) {
-                        if (!visited[job]) {
-                            // Heurystyka: im wcześniejszy termin (due_date), tym wyższa atrakcyjność
-                            // Dodajemy małe '1', by uniknąć dzielenia przez 0
-                            double visibility = 1.0 / (all_jobs[job].due_date + 1.0);
-                            double p = pow(pheromones[pos][job], alpha) * pow(visibility, beta);
-
-                            probabilities.push_back(p);
-                            candidates.push_back(job);
-                            sum_prob += p;
-                        }
+            while (next_gen.size() < pop_size) {
+                // Selekcja turniejowa (wybierz 2 z 5 losowych)
+                auto tournament = [&]() {
+                    int best_idx = rng() % pop_size;
+                    for (int i = 0; i < 3; ++i) {
+                        int idx = rng() % pop_size;
+                        if (population[idx].tardiness < population[best_idx].tardiness) best_idx = idx;
                     }
-                    double r = uniform_real_distribution<double>(0, sum_prob)(rng);
-                    double current_sum = 0;
-                    for (int i = 0; i < probabilities.size(); ++i) {
-                        current_sum += probabilities[i];
-                        if (current_sum >= r) {
-                            int chosen_job = candidates[i];
-                            ants[a].sequence.push_back(chosen_job);
-                            visited[chosen_job] = true;
-                            break;
-                        }
-                    }
-                }
-                ants[a].tardiness = get_tardiness(ants[a].sequence).first;
+                    return population[best_idx].sequence;
+                };
 
-                if (ants[a].tardiness < best_overall_d) {
-                    adjacent_local_search(ants[a].sequence, ants[a].tardiness);
+                vector<int> p1 = tournament();
+                vector<int> p2 = tournament();
+
+                vector<int> child_seq = crossover_ox(p1, p2);
+
+                if (uniform_real_distribution<double>(0, 1)(rng) < mutation_rate) {
+                    mutate(child_seq);
                 }
+
+                auto tardiness = get_tardiness(child_seq).first;
+                if (uniform_real_distribution<double>(0, 1)(rng) < adj_search_rate) {
+                    adjacent_local_search(child_seq, tardiness);
+                }
+
+                next_gen.push_back({child_seq, tardiness});
             }
-
-            for (int i = 0; i < n; ++i)
-                for (int j = 0; j < n; ++j)
-                    pheromones[i][j] *= (1.0 - evaporation);
-
-            for (auto& ant : ants) {
-                if (ant.tardiness < best_overall_d) {
-                    best_overall_d = ant.tardiness;
-                    best_overall_seq = ant.sequence;
-                }
-
-                double deposit = 1.0 / (1.0 + (double)ant.tardiness);
-                for (int i = 0; i < n; ++i) {
-                    pheromones[i][ant.sequence[i]] += deposit;
-                }
-            }
+            population = next_gen;
         }
 
-        return {best_overall_d, best_overall_seq};
+        sort(population.begin(), population.end());
+        return {population[0].tardiness, population[0].sequence};
+    }
+
+    void mutate(vector<int>& seq) {
+        // Swap mutation: zamień dwa losowe zadania
+        int i = rng() % seq.size();
+        int j = rng() % seq.size();
+        swap(seq[i], seq[j]);
     }
 
     vector<int> get_neh_sequence() {
