@@ -99,7 +99,7 @@ private:
             }
         }
     }
-    pair<unsigned long long, vector<int>> solve_small(int time_limit_sec, vector<int> current_seq) {
+    pair<unsigned long long, vector<int>> solve_anneal(int time_limit_sec, vector<int> current_seq) {
         auto start_time = chrono::steady_clock::now();
         double time_limit = (double)time_limit_sec;
 
@@ -207,16 +207,21 @@ private:
         }
         return child;
     }
-    pair<unsigned long long, vector<int>> solve_genetic(double time_limit, vector<int> start_seq) {
+    pair<unsigned long long, vector<int>> run_genetic(
+        double time_limit,
+        const vector<vector<int>>& initial_population
+    ) {
         auto start_time = chrono::steady_clock::now();
-        vector<Individual> population;
 
-        // 1. Inicjalizacja populacji (start_seq + losowe mutacje + całkowicie losowe)
-        population.push_back({start_seq, get_tardiness(start_seq).first});
-        while (population.size() < pop_size) {
-            vector<int> seq = start_seq;
-            if (rng() % 2 == 0) mutate(seq);
-            else shuffle(seq.begin(), seq.end(), rng);
+        vector<Individual> population;
+        population.reserve(pop_size);
+
+        for (const auto& seq : initial_population) {
+            population.push_back({seq, get_tardiness(seq).first});
+        }
+        while ((int)population.size() < pop_size) {
+            vector<int> seq = population[rng() % population.size()].sequence;
+            mutate(seq); 
             population.push_back({seq, get_tardiness(seq).first});
         }
 
@@ -398,34 +403,38 @@ private:
     pair<unsigned long long, vector<int>> solve(int time_limit_sec) {
         auto start_time = chrono::steady_clock::now();
         
-        unsigned long long best_D = numeric_limits<unsigned long long>::max();
-        vector<int> best_seq;
+        vector<pair<unsigned long long, vector<int>>> initial_solutions;
 
-        vector<vector<int>> initial_solutions;
-
-        initial_solutions.push_back(get_edd_sequence());
-        initial_solutions.push_back(get_neh_sequence());
+        auto tmp = get_edd_sequence();
+        initial_solutions.push_back(make_pair(get_tardiness(tmp).first, tmp));
+        tmp = get_neh_sequence();
+        initial_solutions.push_back(make_pair(get_tardiness(tmp).first, tmp));
+        vector<unsigned long long> initial_tardiness;
 
         for (int i = 0; i <= 100; ++i) {
             double alpha = static_cast<double>(i) / 100.0;
-            initial_solutions.push_back(get_setup_weighted_sequence(alpha));
+            auto seq = get_setup_weighted_sequence(alpha);
+            initial_solutions.push_back(make_pair(get_tardiness(seq).first, seq));
         }
+        sort(initial_solutions.begin(), initial_solutions.end(),
+             [](const auto& a, const auto& b) {
+                 return a.first < b.first;
+             });
+        const int POP_SIZE = 5;
+        vector<vector<int>> population;
 
-        for (const auto& seq : initial_solutions) {
-            unsigned long long d = get_tardiness(seq).first;
-            if (d < best_D) {
-                best_D = d;
-                best_seq = seq;
-            }
+        for (int i = 0; i < POP_SIZE && i < (int)initial_solutions.size(); ++i) {
+            population.push_back(initial_solutions[i].second);
         }
         auto now = chrono::steady_clock::now();
         double elapsed = chrono::duration<double>(now - start_time).count();
         double time_left = (static_cast<double>(time_limit_sec) - elapsed);
-        auto greedy = solve_small(time_left * 0.01, best_seq);
-        greedy = solve_small(time_left * 0.35, greedy.second);
-        auto genetic = solve_small(time_left * 0.6, greedy.second);
-        local_distance_swap(genetic.second, genetic.first);
-        return genetic;
+
+        auto gen = run_genetic(time_left * 0.2, population);
+        auto greedy = solve_anneal(time_left * 0.01, gen.second);
+        greedy = solve_anneal(time_left * 0.75, greedy.second);
+        local_distance_swap(greedy.second, greedy.first);
+        return greedy;
     }
 
 public:
